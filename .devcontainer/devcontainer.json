@@ -1,0 +1,34 @@
+{
+  "name": "Delvoker Dev",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "tamasfe.even-better-toml",
+        "GitHub.vscode-pull-request-github",
+        "eamodio.gitlens"
+      ]
+    }
+  },
+
+  // 画面（GUI）をホストOSに転送するための設定（Linux / Windows WSL2向け）
+  "containerEnv": {
+    "DISPLAY": "${localEnv:DISPLAY}"
+  },
+  "runArgs": [
+    "--net=host",
+    "-e", "DISPLAY=${localEnv:DISPLAY}",
+    "-v", "/tmp/.X11-unix:/tmp/.X11-unix"
+  ],
+
+  // コンテナ作成後に実行したいコマンドがあればここに記載
+  "postCreateCommand": "python --version && pyxel --version && claude --version",
+
+  // 開発ユーザーの設定（デフォルトのvscodeユーザーを使用）
+  "remoteUser": "vscode"
+}
