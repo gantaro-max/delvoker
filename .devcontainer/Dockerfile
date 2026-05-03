@@ -6,6 +6,9 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get -y install --no-install-recommends \
     libsdl2-2.0-0 \
     libsdl2-image-2.0-0 \
+    libgl1 \
+    libegl1 \
+    xvfb \
     git \
     curl \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
