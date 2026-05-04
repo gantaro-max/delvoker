@@ -108,8 +108,6 @@ class App:
         # Vanishing point center (darkest)
         nfx1, nfy1, nfx2, nfy2 = FRAMES[MAX_DEPTH]
         pyxel.rect(nfx1, nfy1, nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, COL_NAVY)
-        pyxel.rectb(nfx1, nfy1, nfx2 - nfx1 + 1,
-                    nfy2 - nfy1 + 1, COL_DARK_GRAY)
 
         # Determine how far we can see (stop at first front wall)
         visible = MAX_DEPTH
@@ -132,22 +130,23 @@ class App:
             # Solid wall fills
             if front:
                 pyxel.rect(nfx1, nfy1, nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, wc)
-                pyxel.rectb(nfx1, nfy1, nfx2 - nfx1 + 1,
-                            nfy2 - nfy1 + 1, COL_DARK_GRAY)
             if left:
                 pyxel.tri(fx1, fy1, nfx1, nfy1, nfx1, nfy2, wc)
                 pyxel.tri(fx1, fy1, fx1, fy2, nfx1, nfy2, wc)
-                pyxel.line(nfx1, nfy1, nfx1, nfy2, COL_DARK_GRAY)
             if right:
                 pyxel.tri(nfx2, nfy1, fx2, fy1, fx2, fy2, wc)
                 pyxel.tri(nfx2, nfy1, nfx2, nfy2, fx2, fy2, wc)
-                pyxel.line(nfx2, nfy1, nfx2, nfy2, COL_DARK_GRAY)
+            if d < MAX_DEPTH - 1:
+                # 正面が壁（突き当たり）ならエッジを描画
+                if front:
+                    pyxel.rectb(nfx1, nfy1, nfx2 - nfx1 + 1,
+                                nfy2 - nfy1 + 1, COL_DARK_GRAY)
 
-            # Depth diagonal lines only (shadow-unified color)
-            pyxel.line(fx1, fy1, nfx1, nfy1, COL_DARK_GRAY)
-            pyxel.line(fx2, fy1, nfx2, nfy1, COL_DARK_GRAY)
-            pyxel.line(fx1, fy2, nfx1, nfy2, COL_DARK_GRAY)
-            pyxel.line(fx2, fy2, nfx2, nfy2, COL_DARK_GRAY)
+                # 天井と床の斜め境界線（奥行き線）
+                pyxel.line(fx1, fy1, nfx1, nfy1, COL_DARK_GRAY)
+                pyxel.line(fx2, fy1, nfx2, nfy1, COL_DARK_GRAY)
+                pyxel.line(fx1, fy2, nfx1, nfy2, COL_DARK_GRAY)
+                pyxel.line(fx2, fy2, nfx2, nfy2, COL_DARK_GRAY)
 
     def draw_status(self):
         pyxel.rect(0, STATUS_Y, SCREEN_W, SCREEN_H - STATUS_Y, COL_BLACK)
