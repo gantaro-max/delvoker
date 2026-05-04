@@ -1,34 +1,37 @@
 {
-  "name": "Delvoker Dev",
+  "name": "Delvoker Universal Dev",
   "build": {
     "dockerfile": "Dockerfile"
   },
-  
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
+        "anthropic.claude-code",
         "tamasfe.even-better-toml",
         "GitHub.vscode-pull-request-github",
         "eamodio.gitlens"
       ]
     }
   },
-
-  // 画面（GUI）をホストOSに転送するための設定（Linux / Windows WSL2向け）
   "containerEnv": {
-    "DISPLAY": "${localEnv:DISPLAY}"
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "XDG_RUNTIME_DIR": "/tmp/runtime-1000",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "SDL_AUDIODRIVER": "dummy"
   },
-  "runArgs": [
-    "--net=host",
-    "-e", "DISPLAY=${localEnv:DISPLAY}",
-    "-v", "/tmp/.X11-unix:/tmp/.X11-unix"
+  "mounts": [
+    {
+      "source": "/tmp/.X11-unix",
+      "target": "/tmp/.X11-unix",
+      "type": "bind"
+    }
   ],
-
-  // コンテナ作成後に実行したいコマンドがあればここに記載
-  "postCreateCommand": "python --version && pyxel --version && claude --version",
-
-  // 開発ユーザーの設定（デフォルトのvscodeユーザーを使用）
-  "remoteUser": "vscode"
+  "runArgs": [
+    "--net=host"
+  ],
+  "remoteUser": "vscode",
+  "postCreateCommand": "mkdir -p /tmp/runtime-1000 && chmod 700 /tmp/runtime-1000"
 }
