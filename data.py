@@ -56,11 +56,18 @@ class WeaponItem(Item):
         lo, hi = self.dmg_range()
         return f"{self.name} ({lo}-{hi})"
 
+    def clone(self):
+        return WeaponItem(self.name, self.dice_count, self.dice_sides,
+                          self.static_bonus, self.enchant_bonus, self.value)
+
 
 class ArmorItem(Item):
     def __init__(self, name, def_bonus, value=0):
         super().__init__(name, "armor", value)
         self.def_bonus = def_bonus
+
+    def clone(self):
+        return ArmorItem(self.name, self.def_bonus, self.value)
 
 
 class ConsumableItem(Item):
@@ -68,6 +75,9 @@ class ConsumableItem(Item):
         super().__init__(name, "consumable", value)
         self.hp_restore = hp_restore
         self.mp_restore = mp_restore
+
+    def clone(self):
+        return ConsumableItem(self.name, self.hp_restore, self.mp_restore, self.value)
 
 
 def _build_item(raw):

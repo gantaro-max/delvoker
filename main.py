@@ -256,7 +256,7 @@ class App:
                     msgs.append("  ".join(parts))
             if random.random() < DROP_RATE:
                 drop_key = random.choice(DROP_POOL)
-                drop_item = ITEM_CATALOG[drop_key]
+                drop_item = ITEM_CATALOG[drop_key].clone()  # clone to avoid mutating master data
                 if len(self.player.inventory) < INV_MAX:
                     self.player.inventory.append(drop_item)
                     msgs.append(f"Got: {drop_item.name}!")
@@ -461,7 +461,7 @@ class App:
             item = ITEM_CATALOG[SHOP_KEYS[self.shop_idx]]
             if self.player.gold >= item.value:
                 self.player.gold -= item.value
-                self.player.inventory.append(item)
+                self.player.inventory.append(item.clone())  # clone to avoid mutating master data
 
     # ---- Draw ----
 
