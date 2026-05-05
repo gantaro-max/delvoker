@@ -1,6 +1,6 @@
 import pyxel
 import random
-from data import Status, ENEMY_CATALOG, ITEM_CATALOG
+from data import Status, ENEMY_CATALOG, ITEM_CATALOG, make_enchanted_weapon, EnchantedWeapon
 from window import Window
 
 SCREEN_W = 256
@@ -65,8 +65,9 @@ STATE_SHOP       = 8
 
 INV_MAX   = 8
 SHOP_KEYS = ["short_sword", "long_sword", "staff", "leather_armor", "chain_mail", "herb", "potion", "ether"]
-DROP_POOL = ["short_sword", "leather_armor", "herb", "potion", "staff"]
-DROP_RATE = 0.35
+WEAPON_DROP_POOL = ["short_sword", "long_sword", "staff"]   # エンチャント付与対象
+ITEM_DROP_POOL   = ["leather_armor", "herb", "potion"]      # そのままドロップ
+DROP_RATE        = 0.35
 
 ENCOUNTER_RATE = 0.3
 FLEE_RATE      = 0.5
@@ -255,11 +256,17 @@ class App:
                     if lu["agi"] > 0: parts.append("AGI+1")
                     msgs.append("  ".join(parts))
             if random.random() < DROP_RATE:
-                drop_key = random.choice(DROP_POOL)
-                drop_item = ITEM_CATALOG[drop_key].clone()  # clone to avoid mutating master data
+                if random.random() < 0.6:
+                    # 武器ドロップ：エンチャント抽選あり
+                    drop_key  = random.choice(WEAPON_DROP_POOL)
+                    drop_item = make_enchanted_weapon(drop_key)
+                else:
+                    # 防具・消耗品ドロップ：そのまま
+                    drop_key  = random.choice(ITEM_DROP_POOL)
+                    drop_item = ITEM_CATALOG[drop_key].clone()
                 if len(self.player.inventory) < INV_MAX:
                     self.player.inventory.append(drop_item)
-                    msgs.append(f"Got: {drop_item.name}!")
+                    msgs.append(f"Got: {drop_item.label() if hasattr(drop_item, 'label') else drop_item.name}!")
                 else:
                     msgs.append("Bag full! Item lost.")
             self.battle_won = True
@@ -578,12 +585,22 @@ class App:
                 pyxel.text(cx, cy + 40, "-- Empty --", COL_DARK_GRAY)
             else:
                 for i, item in enumerate(inv):
-                    col    = COL_YELLOW if i == self.inv_idx else COL_WHITE
                     cursor = ">" if i == self.inv_idx else " "
                     eq     = item is self.player.weapon or item is self.player.armor
                     tag    = {"weapon": "W", "armor": "A", "consumable": "C"}.get(item.kind, "?")
-                    name_col = COL_GREEN if eq else col
-                    pyxel.text(cx,          cy + i * 14, f"{cursor} {item.name}", name_col)
+                    # レアリティカラー（装備中は緑を優先）
+                    if eq:
+                        name_col = COL_GREEN
+                    elif isinstance(item, EnchantedWeapon):
+                        name_col = {
+                            "cursed": COL_DARK_PURPLE,
+                            "rare":   COL_ORANGE,
+                            "magic":  COL_YELLOW,
+                        }.get(item.rarity, COL_WHITE)
+                    else:
+                        name_col = COL_WHITE
+                    display  = item.label() if hasattr(item, "label") else item.name
+                    pyxel.text(cx,           cy + i * 14, f"{cursor} {display}", name_col)
                     pyxel.text(cx + cw - 12, cy + i * 14, f"[{tag}]", COL_LIGHT_GRAY)
             p = self.player
             pyxel.text(cx, cy + ch - 16, f"Gold: {p.gold}G   {len(p.inventory)}/{INV_MAX} items", COL_YELLOW)

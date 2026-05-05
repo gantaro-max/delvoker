@@ -61,6 +61,51 @@ class WeaponItem(Item):
                           self.static_bonus, self.enchant_bonus, self.value)
 
 
+class EnchantedWeapon(WeaponItem):
+    """WeaponItemにエンチャント（接頭辞・接尾辞）を付与した派生クラス。"""
+
+    def __init__(self, base: WeaponItem, prefix=None, suffix=None):
+        super().__init__(
+            base.name,
+            base.dice_count  + (prefix["dice_count_mod"]  if prefix else 0),
+            base.dice_sides  + (prefix["dice_sides_mod"]  if prefix else 0),
+            base.static_bonus + (prefix["static_bonus_mod"] if prefix else 0),
+            base.enchant_bonus,
+            base.value,
+        )
+        self.prefix    = prefix   # dict | None
+        self.suffix    = suffix   # dict | None
+        self.attribute = suffix["attribute"] if suffix else None
+        self._base_name = base.name
+
+    @property
+    def rarity(self):
+        cursed = self.prefix and self.prefix.get("dice_count_mod", 0) < 0
+        if cursed:
+            return "cursed"
+        both = self.prefix and self.suffix
+        if both:
+            return "rare"
+        if self.prefix or self.suffix:
+            return "magic"
+        return "common"
+
+    def label(self):
+        parts = []
+        if self.prefix:
+            parts.append(self.prefix["name"])
+        parts.append(self._base_name)
+        if self.suffix:
+            parts.append(f"+{self.suffix['name']}")
+        lo, hi = self.dmg_range()
+        return f"{''.join(parts) if self.prefix or self.suffix else self._base_name} ({lo}-{hi})"
+
+    def clone(self):
+        base = WeaponItem(self._base_name, self.dice_count, self.dice_sides,
+                          self.static_bonus, self.enchant_bonus, self.value)
+        return EnchantedWeapon(base, self.prefix, self.suffix)
+
+
 class ArmorItem(Item):
     def __init__(self, name, def_bonus, value=0):
         super().__init__(name, "armor", value)
@@ -129,6 +174,32 @@ def _build_enemies(raw):
 JOBS          = _build_jobs(    _load_json("jobs.json"))
 ITEM_CATALOG  = _build_items(   _load_json("items.json"))
 ENEMY_CATALOG = _build_enemies( _load_json("enemies.json"))
+_ENCHANTS     = _load_json("enchants.json")
+
+
+def make_enchanted_weapon(base_key: str) -> EnchantedWeapon:
+    """ベース武器にウェイト抽選でエンチャントを付与したEnchantedWeaponを返す。
+    接頭辞・接尾辞ともに付与なし（Common）になることもある。"""
+    base = ITEM_CATALOG[base_key]
+
+    def _pick(pool: dict):
+        keys    = list(pool.keys())
+        weights = [pool[k]["weight"] for k in keys]
+        total   = sum(weights)
+        # 同じウェイト合計分だけ「なし」の枠も用意して付与確率を50%に
+        r = random.randint(0, total * 2 - 1)
+        if r >= total:
+            return None
+        acc = 0
+        for k, w in zip(keys, weights):
+            acc += w
+            if r < acc:
+                return pool[k]
+        return None
+
+    prefix = _pick(_ENCHANTS["prefixes"])
+    suffix = _pick(_ENCHANTS["suffixes"])
+    return EnchantedWeapon(base, prefix, suffix)
 
 
 # ---- Status (character stats sheet) ----
