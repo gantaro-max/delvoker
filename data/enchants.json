@@ -1,13 +1,13 @@
 {
     "prefixes": {
-        "sharp":  { "name": "鋭い",    "dice_sides_mod":  2, "static_bonus_mod": 0, "dice_count_mod":  0, "weight": 30 },
-        "heavy":  { "name": "重厚な",  "dice_sides_mod":  0, "static_bonus_mod": 3, "dice_count_mod":  0, "weight": 30 },
-        "master": { "name": "達人の",  "dice_sides_mod":  0, "static_bonus_mod": 0, "dice_count_mod":  1, "weight": 10 },
-        "cursed": { "name": "呪われた","dice_sides_mod":  0, "static_bonus_mod": 0, "dice_count_mod": -1, "weight": 20 }
+        "sharp":  { "name": "Sharp",  "dice_sides_mod":  2, "static_bonus_mod": 0, "dice_count_mod":  0, "weight": 30 },
+        "heavy":  { "name": "Heavy",  "dice_sides_mod":  0, "static_bonus_mod": 3, "dice_count_mod":  0, "weight": 30 },
+        "master": { "name": "Master", "dice_sides_mod":  0, "static_bonus_mod": 0, "dice_count_mod":  1, "weight": 10 },
+        "cursed": { "name": "Cursed", "dice_sides_mod":  0, "static_bonus_mod": 0, "dice_count_mod": -1, "weight": 20 }
     },
     "suffixes": {
-        "fire":   { "name": "炎",  "attribute": "fire",   "weight": 20 },
-        "ice":    { "name": "氷",  "attribute": "ice",    "weight": 20 },
-        "poison": { "name": "毒",  "attribute": "poison", "weight": 15 }
+        "fire":   { "name": "Fire",   "attribute": "fire",   "weight": 20 },
+        "ice":    { "name": "Ice",    "attribute": "ice",    "weight": 20 },
+        "poison": { "name": "Poison", "attribute": "poison", "weight": 15 }
     }
 }
