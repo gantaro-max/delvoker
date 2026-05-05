@@ -669,8 +669,10 @@ class App:
         pyxel.text(4, STATUS_Y + 4,
                    f"{p.name}  Lv{p.level} {p.job.name}  HP:{p.hp}/{p.max_hp}",
                    COL_WHITE)
+        gold_str = f"Gold:{p.gold}G"
+        pyxel.text(SCREEN_W - 4 - len(gold_str) * 4, STATUS_Y + 4, gold_str, COL_YELLOW)
         pyxel.text(4, STATUS_Y + 16,
-                   f"EXP:{p.exp}/{p.exp_to_next}  Gold:{p.gold}",
+                   f"EXP:{p.exp}/{p.exp_to_next}",
                    COL_YELLOW)
         pyxel.text(4, STATUS_Y + 28,
                    f"({self.px},{self.py}) {DIR_NAMES[self.dir]}",
