@@ -1,0 +1,5 @@
+{
+    "warrior": {"name": "Warrior", "hp_die": 12, "mp_die": 0, "str_growth": 0.8, "def_growth": 0.6, "agi_growth": 0.3},
+    "mage":    {"name": "Mage",    "hp_die": 4,  "mp_die": 8, "str_growth": 0.2, "def_growth": 0.1, "agi_growth": 0.5},
+    "cleric":  {"name": "Cleric",  "hp_die": 7,  "mp_die": 5, "str_growth": 0.3, "def_growth": 0.4, "agi_growth": 0.4}
+}

@@ -1,0 +1,10 @@
+{
+    "slime":    {"name": "Slime",    "hp": 15, "def": 1, "exp_reward": 10, "gold_reward": 5,
+                 "weapon": {"name": "Slime Body",  "dice_count": 1, "dice_sides": 4, "static_bonus": 0}},
+    "bat":      {"name": "Bat",      "hp": 10, "def": 0, "exp_reward": 8,  "gold_reward": 3,
+                 "weapon": {"name": "Bite",        "dice_count": 1, "dice_sides": 3, "static_bonus": 0}},
+    "skeleton": {"name": "Skeleton", "hp": 25, "def": 2, "exp_reward": 20, "gold_reward": 15,
+                 "weapon": {"name": "Bone Club",   "dice_count": 1, "dice_sides": 6, "static_bonus": 0}},
+    "goblin":   {"name": "Goblin",   "hp": 20, "def": 1, "exp_reward": 15, "gold_reward": 10,
+                 "weapon": {"name": "Rusty Sword", "dice_count": 1, "dice_sides": 6, "static_bonus": 1}}
+}
