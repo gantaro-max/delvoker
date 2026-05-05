@@ -100,12 +100,13 @@ class App:
         self.player = Player()
 
         # Battle state
-        self.enemy       = None
-        self.cmd_idx     = 0
-        self.messages    = []
-        self.msg_idx     = 0
-        self.next_state  = None
-        self.battle_won  = False
+        self.enemy          = None
+        self.cmd_idx        = 0
+        self.messages       = []
+        self.msg_idx        = 0
+        self.next_state     = None
+        self.battle_won     = False
+        self.level_up_gains = []  # list of gain dicts from _do_level_up
 
         # Town state
         self.town_cmd_idx   = 0
@@ -198,9 +199,17 @@ class App:
             gold = self.enemy.gold_reward
             self.player.gold += gold
             level_ups = self.player.gain_exp(exp)
+            self.level_up_gains = level_ups
             msgs.append(f"+{exp} EXP  +{gold} Gold")
             if level_ups:
-                msgs.append(f"Level Up! -> Lv{self.player.level}")
+                msgs.append(f"Level Up! Lv{self.player.level - len(level_ups)} -> Lv{self.player.level}")
+                for lu in level_ups:
+                    parts = [f"HP+{lu['hp']}"]
+                    if lu["mp"]  > 0: parts.append(f"MP+{lu['mp']}")
+                    if lu["str"] > 0: parts.append("STR+1")
+                    if lu["def"] > 0: parts.append("DEF+1")
+                    if lu["agi"] > 0: parts.append("AGI+1")
+                    msgs.append("  ".join(parts))
             self.battle_won = True
             self._show_msgs(msgs, STATE_BATTLE_END)
         else:
@@ -302,6 +311,7 @@ class App:
     def _upd_battle_end(self):
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             self.enemy = None
+            self.level_up_gains = []
             if self.player.hp <= 0:
                 self.player.hp = self.player.max_hp
                 self.player.mp = self.player.max_mp
@@ -393,7 +403,17 @@ class App:
                 pyxel.text(SCREEN_W - 58, cy + ch - 8, "Z:Next", COL_DARK_GRAY)
             elif self.state == STATE_BATTLE_END:
                 if self.battle_won:
-                    pyxel.text(cx + (cw - 32) // 2, cy + 14, "VICTORY!", COL_YELLOW)
+                    pyxel.text(cx + (cw - 32) // 2, cy + 8, "VICTORY!", COL_YELLOW)
+                    p = self.player
+                    pyxel.text(cx, cy + 22, f"HP:{p.hp}/{p.max_hp}  EXP:{p.exp}/{p.exp_to_next}", COL_GREEN)
+                    if self.level_up_gains:
+                        lu = self.level_up_gains[-1]
+                        parts = [f"HP+{lu['hp']}"]
+                        if lu["mp"]  > 0: parts.append(f"MP+{lu['mp']}")
+                        if lu["str"] > 0: parts.append("STR+1")
+                        if lu["def"] > 0: parts.append("DEF+1")
+                        if lu["agi"] > 0: parts.append("AGI+1")
+                        pyxel.text(cx, cy + 34, "  ".join(parts), COL_PEACH)
                 else:
                     pyxel.text(cx + (cw - 44) // 2, cy + 14, "DEFEATED...", COL_RED)
                     pyxel.text(cx + (cw - 80) // 2, cy + 28, "Returning to town...", COL_DARK_GRAY)
