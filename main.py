@@ -552,8 +552,8 @@ class App:
             elif self.state == STATE_BATTLE_END:
                 if self.battle_won:
                     pyxel.text(cx + (cw - 32) // 2, cy + 8, "VICTORY!", COL_YELLOW)
-                    p = self.player
-                    pyxel.text(cx, cy + 22, f"HP:{p.hp}/{p.max_hp}  EXP:{p.exp}/{p.exp_to_next}", COL_GREEN)
+                    bp = self.player
+                    pyxel.text(cx, cy + 22, f"HP:{bp.hp}/{bp.max_hp}  EXP:{bp.exp}/{bp.exp_to_next}", COL_GREEN)
                     if self.level_up_gains:
                         lu = self.level_up_gains[-1]
                         parts = [f"HP+{lu['hp']}"]
