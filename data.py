@@ -1,4 +1,13 @@
+import json
 import random
+from pathlib import Path
+
+_DATA_DIR = Path(__file__).parent / "data"
+
+
+def _load_json(filename):
+    with open(_DATA_DIR / filename, encoding="utf-8") as f:
+        return json.load(f)
 
 
 # ---- Jobs ----
@@ -13,11 +22,8 @@ class Job:
         self.agi_growth = agi_growth
 
 
-JOBS = {
-    "warrior": Job("Warrior", hp_die=12, mp_die=0, str_growth=0.8, def_growth=0.6, agi_growth=0.3),
-    "mage":    Job("Mage",    hp_die=4,  mp_die=8, str_growth=0.2, def_growth=0.1, agi_growth=0.5),
-    "cleric":  Job("Cleric",  hp_die=7,  mp_die=5, str_growth=0.3, def_growth=0.4, agi_growth=0.4),
-}
+def _build_jobs(raw):
+    return {key: Job(**val) for key, val in raw.items()}
 
 
 # ---- Items ----
@@ -64,19 +70,24 @@ class ConsumableItem(Item):
         self.mp_restore = mp_restore
 
 
-# ---- Item catalog ----
+def _build_item(raw):
+    t = raw["type"]
+    if t == "weapon":
+        return WeaponItem(
+            raw["name"], raw["dice_count"], raw["dice_sides"],
+            raw.get("static_bonus", 0), 0, raw.get("value", 0)
+        )
+    if t == "armor":
+        return ArmorItem(raw["name"], raw["def_bonus"], raw.get("value", 0))
+    if t == "consumable":
+        return ConsumableItem(
+            raw["name"], raw.get("hp_restore", 0), raw.get("mp_restore", 0), raw.get("value", 0)
+        )
+    raise ValueError(f"Unknown item type: {t}")
 
-ITEM_CATALOG = {
-    "old_dagger":    WeaponItem("Old Dagger",   1, 6,          value=10),
-    "short_sword":   WeaponItem("Short Sword",  1, 8,  1,      value=50),
-    "long_sword":    WeaponItem("Long Sword",   1, 10, 2,      value=150),
-    "staff":         WeaponItem("Staff",        1, 4,          value=20),
-    "leather_armor": ArmorItem("Leather Armor", def_bonus=2,   value=30),
-    "chain_mail":    ArmorItem("Chain Mail",    def_bonus=4,   value=100),
-    "herb":          ConsumableItem("Herb",     hp_restore=10, value=15),
-    "potion":        ConsumableItem("Potion",   hp_restore=30, value=50),
-    "ether":         ConsumableItem("Ether",    mp_restore=15, value=60),
-}
+
+def _build_items(raw):
+    return {key: _build_item(val) for key, val in raw.items()}
 
 
 # ---- Enemy definitions ----
@@ -91,12 +102,23 @@ class EnemyDef:
         self.gold_reward = gold_reward
 
 
-ENEMY_CATALOG = {
-    "slime":    EnemyDef("Slime",    15, WeaponItem("Slime Body",  1, 4),     1, 10,  5),
-    "bat":      EnemyDef("Bat",      10, WeaponItem("Bite",        1, 3),     0,  8,  3),
-    "skeleton": EnemyDef("Skeleton", 25, WeaponItem("Bone Club",   1, 6),     2, 20, 15),
-    "goblin":   EnemyDef("Goblin",   20, WeaponItem("Rusty Sword", 1, 6, 1), 1, 15, 10),
-}
+def _build_enemies(raw):
+    result = {}
+    for key, val in raw.items():
+        w = val["weapon"]
+        weapon = WeaponItem(w["name"], w["dice_count"], w["dice_sides"], w.get("static_bonus", 0))
+        result[key] = EnemyDef(
+            val["name"], val["hp"], weapon,
+            val["def"], val["exp_reward"], val["gold_reward"]
+        )
+    return result
+
+
+# ---- Load master data from JSON ----
+
+JOBS          = _build_jobs(    _load_json("jobs.json"))
+ITEM_CATALOG  = _build_items(   _load_json("items.json"))
+ENEMY_CATALOG = _build_enemies( _load_json("enemies.json"))
 
 
 # ---- Status (character stats sheet) ----
