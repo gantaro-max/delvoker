@@ -1,31 +1,32 @@
 import pyxel
 import random
 from data import Status, ENEMY_CATALOG
+from window import Window
 
 SCREEN_W = 256
 SCREEN_H = 256
 FPS = 30
 TITLE = "Delvoker"
 
-COL_BLACK = 0
-COL_NAVY = 1
+COL_BLACK      = 0
+COL_NAVY       = 1
 COL_DARK_PURPLE = 2
-COL_DARK_GREEN = 3
-COL_BROWN = 4
-COL_DARK_GRAY = 5
-COL_LIGHT_GRAY = 6
-COL_WHITE = 7
-COL_RED = 8
-COL_ORANGE = 9
-COL_YELLOW = 10
-COL_GREEN = 11
-COL_BLUE = 12
-COL_INDIGO = 13
-COL_PINK = 14
-COL_PEACH = 15
+COL_DARK_GREEN  = 3
+COL_BROWN       = 4
+COL_DARK_GRAY   = 5
+COL_LIGHT_GRAY  = 6
+COL_WHITE       = 7
+COL_RED         = 8
+COL_ORANGE      = 9
+COL_YELLOW      = 10
+COL_GREEN       = 11
+COL_BLUE        = 12
+COL_INDIGO      = 13
+COL_PINK        = 14
+COL_PEACH       = 15
 
-VIEW_H = 176
-STATUS_Y = VIEW_H
+VIEW_H    = 176
+STATUS_Y  = VIEW_H
 MAX_DEPTH = 4
 
 FRAMES = [
@@ -50,19 +51,19 @@ DUNGEON_MAP = [
 ]
 
 DIR_VECTORS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
-DIR_NAMES = ['N', 'E', 'S', 'W']
+DIR_NAMES   = ['N', 'E', 'S', 'W']
 
-STATE_TOWN      = 0
-STATE_TOWN_SUB  = 1
-STATE_DUNGEON   = 2
+STATE_TOWN       = 0
+STATE_TOWN_SUB   = 1
+STATE_DUNGEON    = 2
 STATE_BATTLE_CMD = 3
 STATE_BATTLE_MSG = 4
 STATE_BATTLE_END = 5
 
 ENCOUNTER_RATE = 0.3
-FLEE_RATE = 0.5
-COMMANDS   = ["Fight", "Flee"]
-TOWN_MENU  = ["Inn", "Guild", "Shop", "Enter Dungeon"]
+FLEE_RATE      = 0.5
+COMMANDS  = ["Fight", "Flee"]
+TOWN_MENU = ["Inn", "Guild", "Shop", "Enter Dungeon"]
 
 
 def is_wall(x, y):
@@ -80,35 +81,63 @@ class Player(Status):
 
 class Enemy:
     def __init__(self, edef):
-        self.name = edef.name
-        self.hp = edef.hp
-        self.max_hp = edef.hp
-        self.weapon = edef.weapon
-        self.def_ = edef.def_
-        self.exp_reward = edef.exp_reward
+        self.name        = edef.name
+        self.hp          = edef.hp
+        self.max_hp      = edef.hp
+        self.weapon      = edef.weapon
+        self.def_        = edef.def_
+        self.exp_reward  = edef.exp_reward
         self.gold_reward = edef.gold_reward
 
 
 class App:
     def __init__(self):
         pyxel.init(SCREEN_W, SCREEN_H, title=TITLE, fps=FPS)
-        self.px = 1
-        self.py = 1
+        self.px  = 1
+        self.py  = 1
         self.dir = 1
 
         self.player = Player()
-        self.state = STATE_TOWN
-        self.town_cmd_idx = 0
+
+        # Battle state
+        self.enemy       = None
+        self.cmd_idx     = 0
+        self.messages    = []
+        self.msg_idx     = 0
+        self.next_state  = None
+        self.battle_won  = False
+
+        # Town state
+        self.town_cmd_idx   = 0
         self.town_sub_lines = []
 
-        self.enemy = None
-        self.cmd_idx = 0
-        self.messages = []
-        self.msg_idx = 0
-        self.next_state = None
-        self.battle_won = False
+        # UI Windows
+        self.town_win   = Window(8,  30, 240, 100, title="- DELVOKER -")
+        self.status_win = Window(8, 143, 240,  72)
+        self.sub_win    = Window(10, 62, 236, 120)
+        self.battle_win = Window(2, 150, SCREEN_W - 4, 88)
+
+        self.state = None
+        self._set_state(STATE_TOWN)
 
         pyxel.run(self.update, self.draw)
+
+    # ---- state transitions ----
+
+    def _set_state(self, new_state):
+        self.state = new_state
+        if new_state == STATE_TOWN:
+            self.sub_win.close()
+            self.battle_win.close()
+            self.town_win.open()
+            self.status_win.open()
+        elif new_state == STATE_TOWN_SUB:
+            self.sub_win.open()
+        elif new_state == STATE_DUNGEON:
+            self.town_win.close()
+            self.status_win.close()
+            self.sub_win.close()
+            self.battle_win.close()
 
     def wall_at(self, fwd, side):
         dx, dy = DIR_VECTORS[self.dir]
@@ -128,29 +157,34 @@ class App:
             if sel == "Inn":
                 self.player.hp = self.player.max_hp
                 self.player.mp = self.player.max_mp
-                self.town_sub_lines = ["Inn", "Welcome! Rest well.",
+                self.sub_win.title = "Inn"
+                self.town_sub_lines = ["Welcome! Rest well.",
                                        "HP and MP fully restored."]
-                self.state = STATE_TOWN_SUB
+                self._set_state(STATE_TOWN_SUB)
             elif sel == "Guild":
-                self.town_sub_lines = ["Guild", "(Coming soon...)"]
-                self.state = STATE_TOWN_SUB
+                self.sub_win.title = "Guild"
+                self.town_sub_lines = ["(Coming soon...)"]
+                self._set_state(STATE_TOWN_SUB)
             elif sel == "Shop":
-                self.town_sub_lines = ["Shop", "(Coming soon...)"]
-                self.state = STATE_TOWN_SUB
+                self.sub_win.title = "Shop"
+                self.town_sub_lines = ["(Coming soon...)"]
+                self._set_state(STATE_TOWN_SUB)
             elif sel == "Enter Dungeon":
-                self.state = STATE_DUNGEON
+                self._set_state(STATE_DUNGEON)
 
     def _upd_town_sub(self):
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.KEY_X):
-            self.state = STATE_TOWN
+            self._set_state(STATE_TOWN)
 
     # ---- Battle logic ----
 
     def _start_battle(self):
         key = random.choice(list(ENEMY_CATALOG.keys()))
-        self.enemy = Enemy(ENEMY_CATALOG[key])
-        self.state = STATE_BATTLE_CMD
+        self.enemy   = Enemy(ENEMY_CATALOG[key])
         self.cmd_idx = 0
+        self.battle_win.close()
+        self.battle_win.open()
+        self._set_state(STATE_BATTLE_CMD)
 
     def _calc_dmg(self, weapon, target_def):
         return max(1, weapon.roll_damage() - target_def)
@@ -160,7 +194,7 @@ class App:
         self.enemy.hp = max(0, self.enemy.hp - dmg)
         msgs = [f"{self.enemy.name}: -{dmg} HP!"]
         if self.enemy.hp <= 0:
-            exp = self.enemy.exp_reward
+            exp  = self.enemy.exp_reward
             gold = self.enemy.gold_reward
             self.player.gold += gold
             level_ups = self.player.gain_exp(exp)
@@ -191,16 +225,22 @@ class App:
             self._enemy_turn(["Couldn't escape!"])
 
     def _show_msgs(self, messages, next_state):
-        self.messages = messages
-        self.msg_idx = 0
+        self.messages   = messages
+        self.msg_idx    = 0
         self.next_state = next_state
-        self.state = STATE_BATTLE_MSG
+        self.state      = STATE_BATTLE_MSG  # direct: no window transition
 
     # ---- Update ----
 
     def update(self):
         if pyxel.btnp(pyxel.KEY_Q):
             pyxel.quit()
+
+        self.town_win.update()
+        self.status_win.update()
+        self.sub_win.update()
+        self.battle_win.update()
+
         if self.state == STATE_TOWN:
             self._upd_town()
         elif self.state == STATE_TOWN_SUB:
@@ -216,10 +256,10 @@ class App:
 
     def _upd_dungeon(self):
         if pyxel.btnp(pyxel.KEY_T):
-            self.state = STATE_TOWN
+            self._set_state(STATE_TOWN)
             return
         dx, dy = DIR_VECTORS[self.dir]
-        moved = False
+        moved  = False
         if pyxel.btnp(pyxel.KEY_UP):
             nx, ny = self.px + dx, self.py + dy
             if not is_wall(nx, ny):
@@ -252,20 +292,22 @@ class App:
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             self.msg_idx += 1
             if self.msg_idx >= len(self.messages):
-                self.state = self.next_state
-                if self.next_state in (STATE_DUNGEON, STATE_TOWN):
+                ns = self.next_state
+                if ns in (STATE_DUNGEON, STATE_TOWN):
                     self.enemy = None
+                    self._set_state(ns)
+                else:
+                    self.state = ns
 
     def _upd_battle_end(self):
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             self.enemy = None
             if self.player.hp <= 0:
-                # Defeat: restore and force-return to town
                 self.player.hp = self.player.max_hp
                 self.player.mp = self.player.max_mp
-                self.state = STATE_TOWN
+                self._set_state(STATE_TOWN)
             else:
-                self.state = STATE_DUNGEON
+                self._set_state(STATE_DUNGEON)
 
     # ---- Draw ----
 
@@ -284,107 +326,80 @@ class App:
     def _draw_town(self):
         pyxel.cls(COL_BLACK)
 
-        # Title
-        title = "- DELVOKER -"
-        pyxel.text((SCREEN_W - len(title) * 4) // 2, 18, title, COL_YELLOW)
-        sub = "Solace Town"
-        pyxel.text((SCREEN_W - len(sub) * 4) // 2, 30, sub, COL_WHITE)
+        def _menu_content(cx, cy, cw, ch):
+            sub = "Solace Town"
+            pyxel.text(cx + (cw - len(sub) * 4) // 2, cy, sub, COL_WHITE)
+            for i, item in enumerate(TOWN_MENU):
+                col    = COL_YELLOW if i == self.town_cmd_idx else COL_WHITE
+                cursor = ">" if i == self.town_cmd_idx else " "
+                pyxel.text(cx + 4, cy + 12 + i * 14, f"{cursor} {item}", col)
 
-        # Menu box
-        mx, my, mw, mh = 10, 52, 236, 78
-        pyxel.rect(mx, my, mw, mh, COL_NAVY)
-        pyxel.rectb(mx, my, mw, mh, COL_DARK_GRAY)
-        for i, item in enumerate(TOWN_MENU):
-            col = COL_YELLOW if i == self.town_cmd_idx else COL_WHITE
-            cursor = ">" if i == self.town_cmd_idx else " "
-            pyxel.text(mx + 8, my + 10 + i * 14, f"{cursor} {item}", col)
+        self.town_win.draw(_menu_content)
 
-        # Player status box
-        p = self.player
-        sx, sy, sw, sh = 10, 148, 236, 62
-        pyxel.rect(sx, sy, sw, sh, COL_NAVY)
-        pyxel.rectb(sx, sy, sw, sh, COL_DARK_GRAY)
-        pyxel.text(sx + 8, sy + 8,  f"{p.name}  Lv{p.level} {p.job.name}", COL_WHITE)
-        pyxel.text(sx + 8, sy + 20, f"HP: {p.hp}/{p.max_hp}   MP: {p.mp}/{p.max_mp}", COL_GREEN)
-        pyxel.text(sx + 8, sy + 32, f"EXP: {p.exp}/{p.exp_to_next}   Gold: {p.gold}", COL_YELLOW)
-        pyxel.text(sx + 8, sy + 46, f"Weapon: {p.weapon.label()}", COL_PEACH)
+        def _status_content(cx, cy, cw, ch):
+            p = self.player
+            pyxel.text(cx, cy,     f"{p.name}  Lv{p.level} {p.job.name}", COL_WHITE)
+            pyxel.text(cx, cy+12,  f"HP: {p.hp}/{p.max_hp}   MP: {p.mp}/{p.max_mp}", COL_GREEN)
+            pyxel.text(cx, cy+24,  f"EXP: {p.exp}/{p.exp_to_next}   Gold: {p.gold}", COL_YELLOW)
+            pyxel.text(cx, cy+36,  f"Weapon: {p.weapon.label()}", COL_PEACH)
 
-        # Hint
+        self.status_win.draw(_status_content)
         pyxel.text(6, 240, "Z/Space:Enter  Up/Down:Select  Q:Quit", COL_DARK_GRAY)
 
     def _draw_town_sub(self):
         pyxel.cls(COL_BLACK)
 
-        # Facility panel
-        bx, by, bw, bh = 10, 68, 236, 120
-        pyxel.rect(bx, by, bw, bh, COL_NAVY)
-        pyxel.rectb(bx, by, bw, bh, COL_DARK_GRAY)
+        def _sub_content(cx, cy, cw, ch):
+            for i, line in enumerate(self.town_sub_lines):
+                pyxel.text(cx, cy + i * 14, line, COL_WHITE)
+            pyxel.text(cx + cw - 24, cy + ch - 8, "Z:Back", COL_DARK_GRAY)
 
-        if self.town_sub_lines:
-            # Facility name as title
-            name = self.town_sub_lines[0]
-            pyxel.text(bx + (bw - len(name) * 4) // 2, by + 10, name, COL_YELLOW)
-            pyxel.line(bx + 4, by + 20, bx + bw - 4, by + 20, COL_DARK_GRAY)
-            # Body lines
-            for i, line in enumerate(self.town_sub_lines[1:]):
-                pyxel.text(bx + 10, by + 30 + i * 14, line, COL_WHITE)
-
-        pyxel.text(bx + bw - 54, by + bh - 12, "Z:Back", COL_DARK_GRAY)
+        self.sub_win.draw(_sub_content)
 
     def _draw_battle(self):
         pyxel.cls(COL_BLACK)
 
-        # Enemy placeholder: red rectangle centered in upper area
+        # Enemy placeholder (red rect)
         ex, ey, ew, eh = 88, 28, 80, 70
         pyxel.rect(ex, ey, ew, eh, COL_RED)
-
-        # Enemy name (centered above sprite)
         nx = ex + (ew - len(self.enemy.name) * 4) // 2
         pyxel.text(nx, ey - 10, self.enemy.name, COL_WHITE)
-
-        # Enemy HP bar
-        bx, by, bw = ex, ey + eh + 4, ew
+        bx, by, bw_ = ex, ey + eh + 4, ew
         e_hp_f = self.enemy.hp / self.enemy.max_hp
-        pyxel.rect(bx, by, bw, 4, COL_DARK_GRAY)
-        pyxel.rect(bx, by, int(bw * e_hp_f), 4, COL_GREEN)
+        pyxel.rect(bx, by, bw_, 4, COL_DARK_GRAY)
+        pyxel.rect(bx, by, int(bw_ * e_hp_f), 4, COL_GREEN)
         pyxel.text(bx, by + 6, f"HP {self.enemy.hp}/{self.enemy.max_hp}", COL_LIGHT_GRAY)
 
-        # Divider
         pyxel.line(0, 122, SCREEN_W - 1, 122, COL_DARK_GRAY)
 
-        # Player HP (with level and job)
-        p = self.player
+        p      = self.player
         p_hp_f = p.hp / p.max_hp
         pyxel.text(4, 126, f"{p.name} Lv{p.level} {p.job.name}  HP {p.hp}/{p.max_hp}", COL_WHITE)
         pyxel.rect(4, 136, 100, 4, COL_DARK_GRAY)
         p_col = COL_GREEN if p_hp_f > 0.4 else (COL_ORANGE if p_hp_f > 0.2 else COL_RED)
         pyxel.rect(4, 136, int(100 * p_hp_f), 4, p_col)
 
-        # Panel (commands / messages / result)
-        panel_y = 150
-        pyxel.rect(2, panel_y, SCREEN_W - 4, 88, COL_NAVY)
-        pyxel.rectb(2, panel_y, SCREEN_W - 4, 88, COL_DARK_GRAY)
+        def _panel_content(cx, cy, cw, ch):
+            if self.state == STATE_BATTLE_CMD:
+                for i, cmd in enumerate(COMMANDS):
+                    col    = COL_YELLOW if i == self.cmd_idx else COL_WHITE
+                    cursor = ">" if i == self.cmd_idx else " "
+                    pyxel.text(cx, cy + i * 16, f"{cursor} {cmd}", col)
+                pyxel.text(cx, cy + 40, p.weapon.label(), COL_PEACH)
+                pyxel.text(6, cy + ch - 8, "Z/Space:OK  Up/Down:Select", COL_DARK_GRAY)
+            elif self.state == STATE_BATTLE_MSG:
+                if self.msg_idx < len(self.messages):
+                    pyxel.text(cx, cy + 20, self.messages[self.msg_idx], COL_WHITE)
+                pyxel.text(SCREEN_W - 58, cy + ch - 8, "Z:Next", COL_DARK_GRAY)
+            elif self.state == STATE_BATTLE_END:
+                if self.battle_won:
+                    pyxel.text(cx + (cw - 32) // 2, cy + 14, "VICTORY!", COL_YELLOW)
+                else:
+                    pyxel.text(cx + (cw - 44) // 2, cy + 14, "DEFEATED...", COL_RED)
+                    pyxel.text(cx + (cw - 80) // 2, cy + 28, "Returning to town...", COL_DARK_GRAY)
+                pyxel.text(SCREEN_W - 82, cy + ch - 8, "Z:Continue", COL_DARK_GRAY)
 
-        if self.state == STATE_BATTLE_CMD:
-            for i, cmd in enumerate(COMMANDS):
-                col = COL_YELLOW if i == self.cmd_idx else COL_WHITE
-                cursor = ">" if i == self.cmd_idx else " "
-                pyxel.text(10, panel_y + 10 + i * 16, f"{cursor} {cmd}", col)
-            pyxel.text(10, panel_y + 46, p.weapon.label(), COL_PEACH)
-            pyxel.text(6, panel_y + 76, "Z/Space:OK  Up/Down:Select", COL_DARK_GRAY)
-
-        elif self.state == STATE_BATTLE_MSG:
-            if self.msg_idx < len(self.messages):
-                pyxel.text(10, panel_y + 30, self.messages[self.msg_idx], COL_WHITE)
-            pyxel.text(SCREEN_W - 58, panel_y + 76, "Z:Next", COL_DARK_GRAY)
-
-        elif self.state == STATE_BATTLE_END:
-            if self.battle_won:
-                pyxel.text(88, panel_y + 26, "VICTORY!", COL_YELLOW)
-            else:
-                pyxel.text(68, panel_y + 26, "DEFEATED...", COL_RED)
-                pyxel.text(44, panel_y + 42, "Returning to town...", COL_DARK_GRAY)
-            pyxel.text(SCREEN_W - 82, panel_y + 76, "Z:Continue", COL_DARK_GRAY)
+        self.battle_win.draw(_panel_content)
 
     def draw_3d_view(self):
         for d in range(MAX_DEPTH - 1, -1, -1):
@@ -408,25 +423,21 @@ class App:
         for d in range(visible - 1, -1, -1):
             fx1, fy1, fx2, fy2 = FRAMES[d]
             nfx1, nfy1, nfx2, nfy2 = FRAMES[d + 1]
-
             front = self.wall_at(d + 1, 0)
-            left = self.wall_at(d, -1)
+            left  = self.wall_at(d, -1)
             right = self.wall_at(d, 1)
-
-            wc = WALL_COLS[d] if d < len(WALL_COLS) else COL_DARK_GRAY
-
+            wc    = WALL_COLS[d] if d < len(WALL_COLS) else COL_DARK_GRAY
             if front:
                 pyxel.rect(nfx1, nfy1, nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, wc)
             if left:
                 pyxel.tri(fx1, fy1, nfx1, nfy1, nfx1, nfy2, wc)
-                pyxel.tri(fx1, fy1, fx1, fy2, nfx1, nfy2, wc)
+                pyxel.tri(fx1, fy1, fx1,  fy2,  nfx1, nfy2, wc)
             if right:
-                pyxel.tri(nfx2, nfy1, fx2, fy1, fx2, fy2, wc)
+                pyxel.tri(nfx2, nfy1, fx2, fy1, fx2,  fy2,  wc)
                 pyxel.tri(nfx2, nfy1, nfx2, nfy2, fx2, fy2, wc)
             if d < MAX_DEPTH - 1:
                 if front:
-                    pyxel.rectb(nfx1, nfy1, nfx2 - nfx1 + 1,
-                                nfy2 - nfy1 + 1, COL_DARK_GRAY)
+                    pyxel.rectb(nfx1, nfy1, nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, COL_DARK_GRAY)
                 pyxel.line(fx1, fy1, nfx1, nfy1, COL_DARK_GRAY)
                 pyxel.line(fx2, fy1, nfx2, nfy1, COL_DARK_GRAY)
                 pyxel.line(fx1, fy2, nfx1, nfy2, COL_DARK_GRAY)
