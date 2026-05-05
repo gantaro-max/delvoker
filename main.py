@@ -1,6 +1,6 @@
 import pyxel
 import random
-from data import Status, ENEMY_CATALOG
+from data import Status, ENEMY_CATALOG, ITEM_CATALOG
 from window import Window
 
 SCREEN_W = 256
@@ -59,6 +59,14 @@ STATE_DUNGEON    = 2
 STATE_BATTLE_CMD = 3
 STATE_BATTLE_MSG = 4
 STATE_BATTLE_END = 5
+STATE_INVENTORY  = 6
+STATE_INV_ACTION = 7
+STATE_SHOP       = 8
+
+INV_MAX   = 8
+SHOP_KEYS = ["short_sword", "long_sword", "staff", "leather_armor", "chain_mail", "herb", "potion", "ether"]
+DROP_POOL = ["short_sword", "leather_armor", "herb", "potion", "staff"]
+DROP_RATE = 0.35
 
 ENCOUNTER_RATE = 0.3
 FLEE_RATE      = 0.5
@@ -106,17 +114,29 @@ class App:
         self.msg_idx        = 0
         self.next_state     = None
         self.battle_won     = False
-        self.level_up_gains = []  # list of gain dicts from _do_level_up
+        self.level_up_gains = []
 
         # Town state
         self.town_cmd_idx   = 0
         self.town_sub_lines = []
 
+        # Inventory state
+        self.inv_idx        = 0
+        self.inv_action_idx = 0
+        self.inv_actions    = []
+        self.pre_inv_state  = STATE_TOWN
+
+        # Shop state
+        self.shop_idx = 0
+
         # UI Windows
-        self.town_win   = Window(8,  30, 240, 100, title="- DELVOKER -")
-        self.status_win = Window(8, 143, 240,  72)
-        self.sub_win    = Window(10, 62, 236, 120)
-        self.battle_win = Window(2, 150, SCREEN_W - 4, 88)
+        self.town_win       = Window(8,  30, 240, 100, title="- DELVOKER -")
+        self.status_win     = Window(8, 143, 240,  72)
+        self.sub_win        = Window(10, 62, 236, 120)
+        self.battle_win     = Window(2, 150, SCREEN_W - 4, 88)
+        self.inv_win        = Window(8,  10, 240, 230, title="- INVENTORY -")
+        self.inv_action_win = Window(78, 96, 100,  56, title="Action")
+        self.shop_win       = Window(8,  10, 240, 230, title="- SHOP -")
 
         self.state = None
         self._set_state(STATE_TOWN)
@@ -130,6 +150,9 @@ class App:
         if new_state == STATE_TOWN:
             self.sub_win.close()
             self.battle_win.close()
+            self.inv_win.close()
+            self.inv_action_win.close()
+            self.shop_win.close()
             self.town_win.open()
             self.status_win.open()
         elif new_state == STATE_TOWN_SUB:
@@ -139,6 +162,23 @@ class App:
             self.status_win.close()
             self.sub_win.close()
             self.battle_win.close()
+            self.inv_win.close()
+            self.inv_action_win.close()
+            self.shop_win.close()
+        elif new_state == STATE_INVENTORY:
+            self.town_win.close()
+            self.status_win.close()
+            self.sub_win.close()
+            self.shop_win.close()
+            self.inv_action_win.close()
+            self.inv_win.open()
+        elif new_state == STATE_INV_ACTION:
+            self.inv_action_win.open()
+        elif new_state == STATE_SHOP:
+            self.sub_win.close()
+            self.town_win.close()
+            self.status_win.close()
+            self.shop_win.open()
 
     def wall_at(self, fwd, side):
         dx, dy = DIR_VECTORS[self.dir]
@@ -149,6 +189,11 @@ class App:
     # ---- Town logic ----
 
     def _upd_town(self):
+        if pyxel.btnp(pyxel.KEY_I):
+            self.pre_inv_state = STATE_TOWN
+            self.inv_idx = 0
+            self._set_state(STATE_INVENTORY)
+            return
         if pyxel.btnp(pyxel.KEY_UP):
             self.town_cmd_idx = (self.town_cmd_idx - 1) % len(TOWN_MENU)
         if pyxel.btnp(pyxel.KEY_DOWN):
@@ -167,9 +212,8 @@ class App:
                 self.town_sub_lines = ["(Coming soon...)"]
                 self._set_state(STATE_TOWN_SUB)
             elif sel == "Shop":
-                self.sub_win.title = "Shop"
-                self.town_sub_lines = ["(Coming soon...)"]
-                self._set_state(STATE_TOWN_SUB)
+                self.shop_idx = 0
+                self._set_state(STATE_SHOP)
             elif sel == "Enter Dungeon":
                 self._set_state(STATE_DUNGEON)
 
@@ -210,6 +254,14 @@ class App:
                     if lu["def"] > 0: parts.append("DEF+1")
                     if lu["agi"] > 0: parts.append("AGI+1")
                     msgs.append("  ".join(parts))
+            if random.random() < DROP_RATE:
+                drop_key = random.choice(DROP_POOL)
+                drop_item = ITEM_CATALOG[drop_key]
+                if len(self.player.inventory) < INV_MAX:
+                    self.player.inventory.append(drop_item)
+                    msgs.append(f"Got: {drop_item.name}!")
+                else:
+                    msgs.append("Bag full! Item lost.")
             self.battle_won = True
             self._show_msgs(msgs, STATE_BATTLE_END)
         else:
@@ -249,6 +301,9 @@ class App:
         self.status_win.update()
         self.sub_win.update()
         self.battle_win.update()
+        self.inv_win.update()
+        self.inv_action_win.update()
+        self.shop_win.update()
 
         if self.state == STATE_TOWN:
             self._upd_town()
@@ -262,10 +317,21 @@ class App:
             self._upd_battle_msg()
         elif self.state == STATE_BATTLE_END:
             self._upd_battle_end()
+        elif self.state == STATE_INVENTORY:
+            self._upd_inventory()
+        elif self.state == STATE_INV_ACTION:
+            self._upd_inv_action()
+        elif self.state == STATE_SHOP:
+            self._upd_shop()
 
     def _upd_dungeon(self):
         if pyxel.btnp(pyxel.KEY_T):
             self._set_state(STATE_TOWN)
+            return
+        if pyxel.btnp(pyxel.KEY_I):
+            self.pre_inv_state = STATE_DUNGEON
+            self.inv_idx = 0
+            self._set_state(STATE_INVENTORY)
             return
         dx, dy = DIR_VECTORS[self.dir]
         moved  = False
@@ -319,6 +385,84 @@ class App:
             else:
                 self._set_state(STATE_DUNGEON)
 
+    # ---- Inventory logic ----
+
+    def _upd_inventory(self):
+        inv = self.player.inventory
+        if pyxel.btnp(pyxel.KEY_X):
+            self._set_state(self.pre_inv_state)
+            return
+        if not inv:
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.inv_idx = (self.inv_idx - 1) % len(inv)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.inv_idx = (self.inv_idx + 1) % len(inv)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            item = inv[self.inv_idx]
+            self.inv_actions = ["Use", "Drop", "Cancel"] if item.kind == "consumable" \
+                               else ["Equip", "Drop", "Cancel"]
+            self.inv_action_idx = 0
+            self._set_state(STATE_INV_ACTION)
+
+    def _upd_inv_action(self):
+        if pyxel.btnp(pyxel.KEY_X):
+            self._set_state(STATE_INVENTORY)
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.inv_action_idx = (self.inv_action_idx - 1) % len(self.inv_actions)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.inv_action_idx = (self.inv_action_idx + 1) % len(self.inv_actions)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            sel = self.inv_actions[self.inv_action_idx]
+            item = self.player.inventory[self.inv_idx]
+            if sel == "Equip":
+                self._do_equip(item)
+            elif sel == "Use":
+                self._do_use(item)
+            elif sel == "Drop":
+                self.player.inventory.remove(item)
+                self.inv_idx = min(self.inv_idx, max(0, len(self.player.inventory) - 1))
+            self._set_state(STATE_INVENTORY)
+
+    def _do_equip(self, item):
+        p = self.player
+        if item.kind == "weapon":
+            if p.weapon:
+                p.inventory.append(p.weapon)
+            p.weapon = item
+        elif item.kind == "armor":
+            if p.armor:
+                p.inventory.append(p.armor)
+            p.armor = item
+        p.inventory.remove(item)
+        self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
+
+    def _do_use(self, item):
+        p = self.player
+        p.hp = min(p.max_hp, p.hp + item.hp_restore)
+        p.mp = min(p.max_mp, p.mp + item.mp_restore)
+        p.inventory.remove(item)
+        self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
+
+    # ---- Shop logic ----
+
+    def _upd_shop(self):
+        if pyxel.btnp(pyxel.KEY_X):
+            self._set_state(STATE_TOWN)
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.shop_idx = (self.shop_idx - 1) % len(SHOP_KEYS)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.shop_idx = (self.shop_idx + 1) % len(SHOP_KEYS)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            if len(self.player.inventory) >= INV_MAX:
+                return
+            item = ITEM_CATALOG[SHOP_KEYS[self.shop_idx]]
+            if self.player.gold >= item.value:
+                self.player.gold -= item.value
+                self.player.inventory.append(item)
+
     # ---- Draw ----
 
     def draw(self):
@@ -330,6 +474,10 @@ class App:
         elif self.state == STATE_DUNGEON:
             self.draw_3d_view()
             self.draw_status()
+        elif self.state in (STATE_INVENTORY, STATE_INV_ACTION):
+            self._draw_inventory()
+        elif self.state == STATE_SHOP:
+            self._draw_shop()
         else:
             self._draw_battle()
 
@@ -421,6 +569,57 @@ class App:
 
         self.battle_win.draw(_panel_content)
 
+    def _draw_inventory(self):
+        pyxel.cls(COL_BLACK)
+
+        def _inv_content(cx, cy, cw, ch):
+            inv = self.player.inventory
+            if not inv:
+                pyxel.text(cx, cy + 40, "-- Empty --", COL_DARK_GRAY)
+            else:
+                for i, item in enumerate(inv):
+                    col    = COL_YELLOW if i == self.inv_idx else COL_WHITE
+                    cursor = ">" if i == self.inv_idx else " "
+                    eq     = item is self.player.weapon or item is self.player.armor
+                    tag    = {"weapon": "W", "armor": "A", "consumable": "C"}.get(item.kind, "?")
+                    name_col = COL_GREEN if eq else col
+                    pyxel.text(cx,          cy + i * 14, f"{cursor} {item.name}", name_col)
+                    pyxel.text(cx + cw - 12, cy + i * 14, f"[{tag}]", COL_LIGHT_GRAY)
+            p = self.player
+            pyxel.text(cx, cy + ch - 16, f"Gold: {p.gold}G   {len(p.inventory)}/{INV_MAX} items", COL_YELLOW)
+            pyxel.text(cx, cy + ch - 8,  "Z:Select  X:Close  [W]eap [A]rmor [C]onsumable", COL_DARK_GRAY)
+
+        self.inv_win.draw(_inv_content)
+
+        if self.state == STATE_INV_ACTION:
+            def _action_content(cx, cy, _cw, _ch):
+                for i, act in enumerate(self.inv_actions):
+                    col = COL_YELLOW if i == self.inv_action_idx else COL_WHITE
+                    cur = ">" if i == self.inv_action_idx else " "
+                    pyxel.text(cx, cy + i * 14, f"{cur} {act}", col)
+            self.inv_action_win.draw(_action_content)
+
+    def _draw_shop(self):
+        pyxel.cls(COL_BLACK)
+
+        def _shop_content(cx, cy, cw, ch):
+            for i, key in enumerate(SHOP_KEYS):
+                item      = ITEM_CATALOG[key]
+                col       = COL_YELLOW if i == self.shop_idx else COL_WHITE
+                cursor    = ">" if i == self.shop_idx else " "
+                affordable = self.player.gold >= item.value
+                name_col  = col if affordable else COL_DARK_GRAY
+                pyxel.text(cx,           cy + i * 14, f"{cursor} {item.name}", name_col)
+                pyxel.text(cx + cw - 36, cy + i * 14, f"{item.value}G",
+                           COL_YELLOW if affordable else COL_DARK_GRAY)
+            p = self.player
+            pyxel.text(cx, cy + ch - 16, f"Gold: {p.gold}G", COL_YELLOW)
+            if len(p.inventory) >= INV_MAX:
+                pyxel.text(cx + 60, cy + ch - 16, "Bag Full!", COL_RED)
+            pyxel.text(cx, cy + ch - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
+
+        self.shop_win.draw(_shop_content)
+
     def draw_3d_view(self):
         for d in range(MAX_DEPTH - 1, -1, -1):
             fx1, fy1, fx2, fy2 = FRAMES[d]
@@ -477,7 +676,7 @@ class App:
                    f"({self.px},{self.py}) {DIR_NAMES[self.dir]}",
                    COL_LIGHT_GRAY)
         pyxel.text(220, STATUS_Y + 28, "B1F", COL_YELLOW)
-        pyxel.text(4, STATUS_Y + 40, "Arrow:Move/Turn  T:Town  Q:Quit", COL_DARK_GRAY)
+        pyxel.text(4, STATUS_Y + 40, "Arrow:Move  T:Town  I:Item  Q:Quit", COL_DARK_GRAY)
 
 
 if __name__ == "__main__":
