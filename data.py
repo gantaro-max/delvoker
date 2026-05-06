@@ -166,6 +166,21 @@ class ConsumableItem(Item):
         return ConsumableItem(self.name, self.hp_restore, self.mp_restore, self.value)
 
 
+class GrimoireItem(ConsumableItem):
+    """使用するとスキルを習得できる魔導書。"""
+
+    def __init__(self, name, skill_name, mp_cost=5, effect_type="attack", power=10, value=0):
+        super().__init__(name, 0, 0, value)
+        self.skill_name  = skill_name
+        self.mp_cost     = mp_cost
+        self.effect_type = effect_type
+        self.power       = power
+
+    def clone(self):
+        return GrimoireItem(self.name, self.skill_name, self.mp_cost,
+                            self.effect_type, self.power, self.value)
+
+
 def _build_item(raw):
     t = raw["type"]
     if t == "weapon":
@@ -178,8 +193,13 @@ def _build_item(raw):
         return ArmorItem(raw["name"], raw["def_bonus"], raw.get("value", 0))
     if t == "consumable":
         return ConsumableItem(
-            raw["name"], raw.get("hp_restore", 0), raw.get(
-                "mp_restore", 0), raw.get("value", 0)
+            raw["name"], raw.get("hp_restore", 0), raw.get("mp_restore", 0), raw.get("value", 0)
+        )
+    if t == "grimoire":
+        return GrimoireItem(
+            raw["name"], raw["skill_name"],
+            raw.get("mp_cost", 5), raw.get("effect_type", "attack"),
+            raw.get("power", 10), raw.get("value", 0),
         )
     raise ValueError(f"Unknown item type: {t}")
 
@@ -232,6 +252,18 @@ NPC_TYPES = {
 
 # 三すくみ属性相性: fire > ice > poison > fire
 ATTR_AFFINITY = {"fire": "ice", "ice": "poison", "poison": "fire"}
+
+MAX_SKILLS = 4
+
+
+class Skill:
+    """プレイヤーが魔導書から習得できるアクティブスキル。"""
+
+    def __init__(self, name, mp_cost=5, effect_type="attack", power=10):
+        self.name        = name
+        self.mp_cost     = mp_cost
+        self.effect_type = effect_type  # "attack" | "heal"
+        self.power       = power
 
 
 def make_enchanted_armor(base_key: str) -> EnchantedArmor:
@@ -305,6 +337,7 @@ class Status:
         self.weaknesses   = []
         self._resistances = []
         self.personality  = "normal"  # "normal" | "reckless" | "cowardly" | "selfish"
+        self.skills       = []        # max MAX_SKILLS slots
 
     @property
     def resistances(self) -> list:
@@ -364,6 +397,7 @@ class NPCMember(Status):
         super().__init__(job_key, name)
         self.personality = personality if personality in self.PERSONALITIES else "normal"
         self.inventory = []
+        self.is_unique = False  # True: 固有NPC（昇格済み、手動操作可能）
 
 
 class Party:
