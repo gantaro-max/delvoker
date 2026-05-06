@@ -9,5 +9,14 @@
         "fire":   { "name": "Fire",   "attribute": "fire",   "weight": 20 },
         "ice":    { "name": "Ice",    "attribute": "ice",    "weight": 20 },
         "poison": { "name": "Poison", "attribute": "poison", "weight": 15 }
+    },
+    "armor_prefixes": {
+        "sturdy": { "name": "Sturdy", "def_bonus_mod":  2, "weight": 30 },
+        "light":  { "name": "Light",  "def_bonus_mod": -1, "weight": 20 }
+    },
+    "armor_suffixes": {
+        "of_heat":  { "name": "Heat",  "attribute": "fire",   "weight": 20 },
+        "of_cold":  { "name": "Cold",  "attribute": "ice",    "weight": 20 },
+        "of_venom": { "name": "Venom", "attribute": "poison", "weight": 15 }
     }
 }

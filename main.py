@@ -1,7 +1,11 @@
 import pyxel
 import random
-from data import Status, ENEMY_CATALOG, ITEM_CATALOG, make_enchanted_weapon, EnchantedWeapon
+from data import (Status, ENEMY_CATALOG, ITEM_CATALOG,
+                  make_enchanted_weapon, EnchantedWeapon,
+                  make_enchanted_armor, EnchantedArmor,
+                  NPCMember, Party, ATTR_AFFINITY)
 from window import Window
+from npc import NPC
 
 SCREEN_W = 256
 SCREEN_H = 256
@@ -69,7 +73,7 @@ WEAPON_DROP_POOL = ["short_sword", "long_sword", "staff"]   # エンチャント
 ITEM_DROP_POOL   = ["leather_armor", "herb", "potion"]      # そのままドロップ
 DROP_RATE        = 0.35
 
-ENCOUNTER_RATE = 0.3
+ENCOUNTER_RATE = 0.15
 FLEE_RATE      = 0.5
 COMMANDS  = ["Fight", "Flee"]
 TOWN_MENU = ["Inn", "Guild", "Shop", "Enter Dungeon"]
@@ -97,6 +101,8 @@ class Enemy:
         self.def_        = edef.def_
         self.exp_reward  = edef.exp_reward
         self.gold_reward = edef.gold_reward
+        self.weaknesses  = edef.weaknesses
+        self.resistances = edef.resistances
 
 
 class App:
@@ -107,6 +113,18 @@ class App:
         self.dir = 1
 
         self.player = Player()
+
+        # Party (player + up to 2 NPC members)
+        self.party = Party(self.player)
+        demo_npc = NPCMember("warrior", "Gard", "reckless")
+        self.party.add(demo_npc)
+
+        # NPC list
+        self.npcs = [
+            NPC("slime",  5, 1),
+            NPC("goblin", 5, 3),
+            NPC("slime",  3, 6),
+        ]
 
         # Battle state
         self.enemy          = None
@@ -224,63 +242,110 @@ class App:
 
     # ---- Battle logic ----
 
-    def _start_battle(self):
-        key = random.choice(list(ENEMY_CATALOG.keys()))
+    def _start_battle(self, enemy_key=None):
+        key = enemy_key if enemy_key else random.choice(list(ENEMY_CATALOG.keys()))
         self.enemy   = Enemy(ENEMY_CATALOG[key])
         self.cmd_idx = 0
         self.battle_win.close()
         self.battle_win.open()
         self._set_state(STATE_BATTLE_CMD)
 
-    def _calc_dmg(self, weapon, target_def):
-        return max(1, weapon.roll_damage() - target_def)
+    def _calc_dmg(self, weapon, target_def, target=None):
+        base = max(1, weapon.roll_damage() - target_def)
+        attr = getattr(weapon, "attribute", None)
+        if attr and target:
+            if attr in target.weaknesses:
+                return max(1, int(base * 1.5))
+            if attr in target.resistances:
+                return max(1, int(base * 0.5))
+            # 三すくみ: 武器属性がターゲットの自然属性（耐性）を打ち消す場合は特効
+            cntr = ATTR_AFFINITY.get(attr)
+            if cntr and cntr in target.resistances:
+                return max(1, int(base * 1.5))
+            # holy は全属性（非耐性）に対して微小ボーナス
+            if attr == "holy":
+                return max(1, int(base * 1.2))
+        return base
+
+    def _npc_combat_action(self, npc, msgs):
+        """NPC の1ターン行動。25%確率で性格に基づく AI 行動を取る。"""
+        if random.random() < 0.25:
+            msgs.append(f"{npc.name} acts on their own!")
+            p = npc.personality
+            if p == "reckless":
+                dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
+                self.enemy.hp = max(0, self.enemy.hp - dmg)
+                msgs.append(f"[Reckless] {npc.name} attacks wildly! {self.enemy.name}: -{dmg} HP!")
+            elif p == "cowardly":
+                msgs.append(f"[Cowardly] {npc.name} hesitates and does nothing!")
+            elif p == "selfish":
+                msgs.append(f"[Selfish] {npc.name} tends to their own wounds! (skipped)")
+            else:
+                dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
+                self.enemy.hp = max(0, self.enemy.hp - dmg)
+                msgs.append(f"{npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
+        else:
+            dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
+            self.enemy.hp = max(0, self.enemy.hp - dmg)
+            msgs.append(f"{npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
+
+    def _handle_victory(self, msgs):
+        """戦闘勝利処理（EXP/Gold獲得、レベルアップ、ドロップ）。"""
+        exp  = self.enemy.exp_reward
+        gold = self.enemy.gold_reward
+        self.player.gold += gold
+        level_ups = self.player.gain_exp(exp)
+        self.level_up_gains = level_ups
+        msgs.append(f"+{exp} EXP  +{gold} Gold")
+        if level_ups:
+            msgs.append(f"Level Up! Lv{self.player.level - len(level_ups)} -> Lv{self.player.level}")
+            for lu in level_ups:
+                parts = [f"HP+{lu['hp']}"]
+                if lu["mp"]  > 0: parts.append(f"MP+{lu['mp']}")
+                if lu["str"] > 0: parts.append("STR+1")
+                if lu["def"] > 0: parts.append("DEF+1")
+                if lu["agi"] > 0: parts.append("AGI+1")
+                msgs.append("  ".join(parts))
+        if random.random() < DROP_RATE:
+            if random.random() < 0.6:
+                drop_key  = random.choice(WEAPON_DROP_POOL)
+                drop_item = make_enchanted_weapon(drop_key)
+            else:
+                drop_key  = random.choice(ITEM_DROP_POOL)
+                base_item = ITEM_CATALOG[drop_key]
+                if base_item.kind == "armor":
+                    drop_item = make_enchanted_armor(drop_key)
+                else:
+                    drop_item = base_item.clone()
+            if len(self.player.inventory) < INV_MAX:
+                self.player.inventory.append(drop_item)
+                msgs.append(f"Got: {drop_item.label() if hasattr(drop_item, 'label') else drop_item.name}!")
+            else:
+                msgs.append("Bag full! Item lost.")
+        self.battle_won = True
+        self._show_msgs(msgs, STATE_BATTLE_END)
 
     def _player_attack(self):
-        dmg = self._calc_dmg(self.player.weapon, self.enemy.def_)
+        dmg = self._calc_dmg(self.player.weapon, self.enemy.def_, self.enemy)
         self.enemy.hp = max(0, self.enemy.hp - dmg)
         msgs = [f"{self.enemy.name}: -{dmg} HP!"]
+        if self.enemy.hp > 0:
+            for npc in self.party.alive[1:]:
+                if self.enemy.hp <= 0:
+                    break
+                self._npc_combat_action(npc, msgs)
         if self.enemy.hp <= 0:
-            exp  = self.enemy.exp_reward
-            gold = self.enemy.gold_reward
-            self.player.gold += gold
-            level_ups = self.player.gain_exp(exp)
-            self.level_up_gains = level_ups
-            msgs.append(f"+{exp} EXP  +{gold} Gold")
-            if level_ups:
-                msgs.append(f"Level Up! Lv{self.player.level - len(level_ups)} -> Lv{self.player.level}")
-                for lu in level_ups:
-                    parts = [f"HP+{lu['hp']}"]
-                    if lu["mp"]  > 0: parts.append(f"MP+{lu['mp']}")
-                    if lu["str"] > 0: parts.append("STR+1")
-                    if lu["def"] > 0: parts.append("DEF+1")
-                    if lu["agi"] > 0: parts.append("AGI+1")
-                    msgs.append("  ".join(parts))
-            if random.random() < DROP_RATE:
-                if random.random() < 0.6:
-                    # 武器ドロップ：エンチャント抽選あり
-                    drop_key  = random.choice(WEAPON_DROP_POOL)
-                    drop_item = make_enchanted_weapon(drop_key)
-                else:
-                    # 防具・消耗品ドロップ：そのまま
-                    drop_key  = random.choice(ITEM_DROP_POOL)
-                    drop_item = ITEM_CATALOG[drop_key].clone()
-                if len(self.player.inventory) < INV_MAX:
-                    self.player.inventory.append(drop_item)
-                    msgs.append(f"Got: {drop_item.label() if hasattr(drop_item, 'label') else drop_item.name}!")
-                else:
-                    msgs.append("Bag full! Item lost.")
-            self.battle_won = True
-            self._show_msgs(msgs, STATE_BATTLE_END)
+            self._handle_victory(msgs)
         else:
             self._enemy_turn(msgs)
 
     def _enemy_turn(self, msgs=None):
         if msgs is None:
             msgs = []
-        dmg = self._calc_dmg(self.enemy.weapon, self.player.total_def)
+        dmg = self._calc_dmg(self.enemy.weapon, self.player.total_def, self.player)
         self.player.hp = max(0, self.player.hp - dmg)
         msgs.append(f"{self.player.name}: -{dmg} HP!")
-        if self.player.hp <= 0:
+        if self.party.is_wiped_out:
             self.battle_won = False
             self._show_msgs(msgs, STATE_BATTLE_END)
         else:
@@ -356,8 +421,22 @@ class App:
             self.dir = (self.dir - 1) % 4
         if pyxel.btnp(pyxel.KEY_RIGHT):
             self.dir = (self.dir + 1) % 4
-        if moved and random.random() < ENCOUNTER_RATE:
-            self._start_battle()
+        if moved:
+            for npc in self.npcs:
+                if npc.at_player(self.px, self.py):
+                    self.npcs.remove(npc)
+                    self._start_battle(npc.enemy_key)
+                    return
+            if random.random() < ENCOUNTER_RATE:
+                self._start_battle()
+                return
+
+        for npc in self.npcs:
+            npc.update(self.px, self.py, is_wall)
+            if npc.at_player(self.px, self.py):
+                self.npcs.remove(npc)
+                self._start_battle(npc.enemy_key)
+                return
 
     def _upd_battle_cmd(self):
         if pyxel.btnp(pyxel.KEY_UP):
@@ -385,9 +464,10 @@ class App:
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             self.enemy = None
             self.level_up_gains = []
-            if self.player.hp <= 0:
-                self.player.hp = self.player.max_hp
-                self.player.mp = self.player.max_mp
+            if self.party.is_wiped_out:
+                for m in self.party.members:
+                    m.hp = m.max_hp
+                    m.mp = m.max_mp
                 self._set_state(STATE_TOWN)
             else:
                 self._set_state(STATE_DUNGEON)
@@ -480,6 +560,7 @@ class App:
             self._draw_town_sub()
         elif self.state == STATE_DUNGEON:
             self.draw_3d_view()
+            self.draw_npcs()
             self.draw_status()
         elif self.state in (STATE_INVENTORY, STATE_INV_ACTION):
             self._draw_inventory()
@@ -543,6 +624,10 @@ class App:
         pyxel.rect(4, 136, 100, 4, COL_DARK_GRAY)
         p_col = COL_GREEN if p_hp_f > 0.4 else (COL_ORANGE if p_hp_f > 0.2 else COL_RED)
         pyxel.rect(4, 136, int(100 * p_hp_f), 4, p_col)
+        # NPC party member HP (compact, one per column)
+        for i, npc in enumerate(self.party.members[1:]):
+            npc_col = COL_GREEN if npc.hp > npc.max_hp * 0.4 else (COL_ORANGE if npc.hp > 0 else COL_RED)
+            pyxel.text(4 + i * 128, 142, f"{npc.name[:6]} HP:{npc.hp}/{npc.max_hp}", npc_col)
 
         def _panel_content(cx, cy, cw, ch):
             if self.state == STATE_BATTLE_CMD:
@@ -597,6 +682,8 @@ class App:
                             "rare":   COL_ORANGE,
                             "magic":  COL_YELLOW,
                         }.get(item.rarity, COL_WHITE)
+                    elif isinstance(item, EnchantedArmor):
+                        name_col = COL_YELLOW if item.rarity == "magic" else COL_WHITE
                     else:
                         name_col = COL_WHITE
                     display  = item.label() if hasattr(item, "label") else item.name
@@ -678,6 +765,10 @@ class App:
                 pyxel.line(fx2, fy1, nfx2, nfy1, COL_DARK_GRAY)
                 pyxel.line(fx1, fy2, nfx1, nfy2, COL_DARK_GRAY)
                 pyxel.line(fx2, fy2, nfx2, nfy2, COL_DARK_GRAY)
+
+    def draw_npcs(self):
+        for npc in self.npcs:
+            npc.draw(self.px, self.py, self.dir, is_wall)
 
     def draw_status(self):
         pyxel.rect(0, STATUS_Y, SCREEN_W, SCREEN_H - STATUS_Y, COL_BLACK)

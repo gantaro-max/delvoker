@@ -9,6 +9,7 @@
         "ms-python.python",
         "ms-python.vscode-pylance",
         "anthropic.claude-code",
+        "google.geminicodeassist",
         "tamasfe.even-better-toml",
         "GitHub.vscode-pull-request-github",
         "eamodio.gitlens"
