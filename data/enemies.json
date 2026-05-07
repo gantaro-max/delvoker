@@ -14,5 +14,8 @@
                   "resistances": ["fire"], "ai_type": "normal"},
     "orc_chief": {"name": "Orc Chief","hp": 60, "def": 4, "exp_reward": 80, "gold_reward": 50,
                   "weapon": {"name": "Iron Maul",   "dice_count": 2, "dice_sides": 8, "static_bonus": 2},
-                  "ai_type": "support", "telegraph_message": "The Orc Chief is charging power!"}
+                  "ai_type": "support", "telegraph_message": "The Orc Chief is charging power!",
+                  "parts": [
+                    {"name": "Right Arm", "hp_ratio": 0.4, "weakness": "fire", "drop_flag": "chief_gauntlet"}
+                  ]}
 }

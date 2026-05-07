@@ -219,7 +219,8 @@ def _build_items(raw):
 class EnemyDef:
     def __init__(self, name, hp, weapon, def_, exp_reward, gold_reward,
                  weaknesses=None, resistances=None, ai_type="normal",
-                 telegraph_message="", inflict_status="", inflict_chance=0.0):
+                 telegraph_message="", inflict_status="", inflict_chance=0.0,
+                 parts=None):
         self.name = name
         self.hp = hp
         self.weapon = weapon
@@ -232,6 +233,7 @@ class EnemyDef:
         self.telegraph_message = telegraph_message
         self.inflict_status    = inflict_status
         self.inflict_chance    = inflict_chance
+        self.parts             = parts or []
 
 
 def _build_enemies(raw):
@@ -249,6 +251,7 @@ def _build_enemies(raw):
             telegraph_message=val.get("telegraph_message", ""),
             inflict_status=val.get("inflict_status", ""),
             inflict_chance=val.get("inflict_chance", 0.0),
+            parts=val.get("parts", []),
         )
     return result
 
