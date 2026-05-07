@@ -4,6 +4,12 @@ from pathlib import Path
 
 _DATA_DIR = Path(__file__).parent / "data"
 
+# Dungeon tile types
+TILE_FLOOR  = 0
+TILE_WALL   = 1
+TILE_STAIRS = 2
+TILE_CHEST  = 3
+
 
 def _load_json(filename):
     with open(_DATA_DIR / filename, encoding="utf-8") as f:
@@ -211,15 +217,21 @@ def _build_items(raw):
 # ---- Enemy definitions ----
 
 class EnemyDef:
-    def __init__(self, name, hp, weapon, def_, exp_reward, gold_reward, weaknesses=None, resistances=None):
+    def __init__(self, name, hp, weapon, def_, exp_reward, gold_reward,
+                 weaknesses=None, resistances=None, ai_type="normal",
+                 telegraph_message="", inflict_status="", inflict_chance=0.0):
         self.name = name
         self.hp = hp
         self.weapon = weapon
         self.def_ = def_
         self.exp_reward = exp_reward
         self.gold_reward = gold_reward
-        self.weaknesses  = weaknesses  or []
-        self.resistances = resistances or []
+        self.weaknesses        = weaknesses  or []
+        self.resistances       = resistances or []
+        self.ai_type           = ai_type
+        self.telegraph_message = telegraph_message
+        self.inflict_status    = inflict_status
+        self.inflict_chance    = inflict_chance
 
 
 def _build_enemies(raw):
@@ -233,6 +245,10 @@ def _build_enemies(raw):
             val["def"], val["exp_reward"], val["gold_reward"],
             weaknesses=val.get("weaknesses", []),
             resistances=val.get("resistances", []),
+            ai_type=val.get("ai_type", "normal"),
+            telegraph_message=val.get("telegraph_message", ""),
+            inflict_status=val.get("inflict_status", ""),
+            inflict_chance=val.get("inflict_chance", 0.0),
         )
     return result
 
@@ -246,8 +262,9 @@ _ENCHANTS = _load_json("enchants.json")
 
 
 NPC_TYPES = {
-    "slime":  {"name": "Slime",  "color": 11, "chase_range": 2, "wander_interval": 60, "enemy_key": "slime"},
-    "goblin": {"name": "Goblin", "color": 9,  "chase_range": 3, "wander_interval": 45, "enemy_key": "goblin"},
+    "slime":    {"name": "Slime",    "color": 11, "chase_range": 2, "wander_interval": 60, "enemy_key": "slime"},
+    "goblin":   {"name": "Goblin",   "color": 9,  "chase_range": 3, "wander_interval": 45, "enemy_key": "goblin"},
+    "skeleton": {"name": "Skeleton", "color": 5,  "chase_range": 3, "wander_interval": 50, "enemy_key": "skeleton"},
 }
 
 # 三すくみ属性相性: fire > ice > poison > fire
@@ -314,6 +331,88 @@ def make_enchanted_weapon(base_key: str) -> EnchantedWeapon:
     return EnchantedWeapon(base, prefix, suffix)
 
 
+# ---- Dungeon Map ----
+
+class Map:
+    """Dungeon floor tile map with procedural generation and exploration tracking."""
+
+    def __init__(self, tiles, width, height):
+        self.tiles   = tiles      # tiles[y][x]
+        self.width   = width
+        self.height  = height
+        self.visited = [[False] * width for _ in range(height)]
+        self.start_x = 1
+        self.start_y = 1
+
+    def is_wall(self, x, y):
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            return True
+        return self.tiles[y][x] == TILE_WALL
+
+    def tile_at(self, x, y):
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            return TILE_WALL
+        return self.tiles[y][x]
+
+    def visit(self, x, y):
+        if 0 <= x < self.width and 0 <= y < self.height:
+            self.visited[y][x] = True
+
+    def set_tile(self, x, y, tile):
+        if 0 <= x < self.width and 0 <= y < self.height:
+            self.tiles[y][x] = tile
+
+    @staticmethod
+    def generate_random(width=20, height=20):
+        tiles = [[TILE_WALL] * width for _ in range(height)]
+        rooms = []
+
+        for _ in range(25):
+            rw = random.randint(3, 6)
+            rh = random.randint(3, 5)
+            rx = random.randint(1, width - rw - 1)
+            ry = random.randint(1, height - rh - 1)
+            overlaps = any(
+                rx < ox + ow + 1 and rx + rw + 1 > ox and
+                ry < oy + oh + 1 and ry + rh + 1 > oy
+                for ox, oy, ow, oh in rooms
+            )
+            if not overlaps:
+                for cy in range(ry, ry + rh):
+                    for cx in range(rx, rx + rw):
+                        tiles[cy][cx] = TILE_FLOOR
+                rooms.append((rx, ry, rw, rh))
+
+        for i in range(1, len(rooms)):
+            x1 = rooms[i-1][0] + rooms[i-1][2] // 2
+            y1 = rooms[i-1][1] + rooms[i-1][3] // 2
+            x2 = rooms[i][0]   + rooms[i][2]   // 2
+            y2 = rooms[i][1]   + rooms[i][3]   // 2
+            cx = x1
+            while cx != x2:
+                tiles[y1][cx] = TILE_FLOOR
+                cx += 1 if x2 > x1 else -1
+            cy = y1
+            while cy != y2:
+                tiles[cy][x2] = TILE_FLOOR
+                cy += 1 if y2 > y1 else -1
+
+        if rooms:
+            lx, ly, lw, lh = rooms[-1]
+            tiles[ly + lh // 2][lx + lw // 2] = TILE_STAIRS
+
+        if len(rooms) >= 2:
+            mid = max(1, len(rooms) // 2)
+            cr = rooms[mid]
+            tiles[cr[1] + cr[3] // 2][cr[0] + cr[2] // 2] = TILE_CHEST
+
+        m = Map(tiles, width, height)
+        if rooms:
+            m.start_x = rooms[0][0] + rooms[0][2] // 2
+            m.start_y = rooms[0][1] + rooms[0][3] // 2
+        return m
+
+
 # ---- Status (character stats sheet) ----
 
 class Status:
@@ -338,6 +437,9 @@ class Status:
         self._resistances = []
         self.personality  = "normal"  # "normal" | "reckless" | "cowardly" | "selfish"
         self.skills       = []        # max MAX_SKILLS slots
+        self.mag          = 2
+        self.bonus_points = 0
+        self.status_effects = {"poison": 0, "stun": 0}
 
     @property
     def resistances(self) -> list:
@@ -384,6 +486,7 @@ class Status:
         self.agi += agi_gain
         self.hp = self.max_hp
         self.mp = self.max_mp
+        self.bonus_points += 3
         return {"hp": hp_gain, "mp": mp_gain, "str": str_gain,
                 "def": def_gain, "agi": agi_gain}
 
