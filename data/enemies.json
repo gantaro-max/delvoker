@@ -1,13 +1,21 @@
 {
-    "slime":    {"name": "Slime",    "hp": 15, "def": 1, "exp_reward": 10, "gold_reward": 5,
-                 "weapon": {"name": "Slime Body",  "dice_count": 1, "dice_sides": 4, "static_bonus": 0}},
-    "bat":      {"name": "Bat",      "hp": 10, "def": 0, "exp_reward": 8,  "gold_reward": 3,
-                 "weapon": {"name": "Bite",        "dice_count": 1, "dice_sides": 3, "static_bonus": 0},
-                 "weaknesses": ["holy"]},
-    "skeleton": {"name": "Skeleton", "hp": 25, "def": 2, "exp_reward": 20, "gold_reward": 15,
-                 "weapon": {"name": "Bone Club",   "dice_count": 1, "dice_sides": 6, "static_bonus": 0},
-                 "resistances": ["ice"], "weaknesses": ["holy"]},
-    "goblin":   {"name": "Goblin",   "hp": 20, "def": 1, "exp_reward": 15, "gold_reward": 10,
-                 "weapon": {"name": "Rusty Sword", "dice_count": 1, "dice_sides": 6, "static_bonus": 1},
-                 "resistances": ["fire"]}
+    "slime":     {"name": "Slime",     "hp": 15, "def": 1, "exp_reward": 10, "gold_reward": 5,
+                  "weapon": {"name": "Slime Body",  "dice_count": 1, "dice_sides": 4, "static_bonus": 0},
+                  "ai_type": "normal", "inflict_status": "poison", "inflict_chance": 0.3},
+    "bat":       {"name": "Bat",       "hp": 10, "def": 0, "exp_reward": 8,  "gold_reward": 3,
+                  "weapon": {"name": "Bite",        "dice_count": 1, "dice_sides": 3, "static_bonus": 0},
+                  "weaknesses": ["holy"], "ai_type": "ranged"},
+    "skeleton":  {"name": "Skeleton",  "hp": 25, "def": 2, "exp_reward": 20, "gold_reward": 15,
+                  "weapon": {"name": "Bone Club",   "dice_count": 1, "dice_sides": 6, "static_bonus": 0},
+                  "resistances": ["ice"], "weaknesses": ["holy"],
+                  "ai_type": "normal", "inflict_status": "stun", "inflict_chance": 0.2},
+    "goblin":    {"name": "Goblin",    "hp": 20, "def": 1, "exp_reward": 15, "gold_reward": 10,
+                  "weapon": {"name": "Rusty Sword", "dice_count": 1, "dice_sides": 6, "static_bonus": 1},
+                  "resistances": ["fire"], "ai_type": "normal"},
+    "orc_chief": {"name": "Orc Chief","hp": 60, "def": 4, "exp_reward": 80, "gold_reward": 50,
+                  "weapon": {"name": "Iron Maul",   "dice_count": 2, "dice_sides": 8, "static_bonus": 2},
+                  "ai_type": "support", "telegraph_message": "The Orc Chief is charging power!",
+                  "parts": [
+                    {"name": "Right Arm", "hp_ratio": 0.4, "weakness": "fire", "drop_flag": "chief_gauntlet"}
+                  ]}
 }
