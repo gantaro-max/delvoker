@@ -527,3 +527,7 @@ class Party:
     @property
     def alive(self) -> list:
         return [m for m in self.members if m.hp > 0]
+
+    @property
+    def fallen(self) -> list:
+        return [m for m in self.members if m.hp <= 0]

@@ -73,6 +73,8 @@ STATE_BATTLE_NPC_CMD = 9
 STATE_GUILD = 10
 STATE_STAT_ALLOC = 11
 STATE_BATTLE_TARGET_PART = 12
+STATE_REVIVE = 13
+STATE_INV_GIVE_NPC = 14
 
 INV_MAX = 8
 SHOP_KEYS = ["short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
@@ -85,7 +87,7 @@ DROP_RATE = 0.35
 ENCOUNTER_RATE = 0.15
 FLEE_RATE = 0.5
 COMMANDS = ["Fight", "Flee"]
-TOWN_MENU = ["Inn", "Guild", "Shop", "Stats", "Enter Dungeon"]
+TOWN_MENU = ["Inn", "Guild", "Shop", "Stats", "Revive", "Enter Dungeon"]
 
 STAT_ALLOC_NAMES = ["STR", "DEF", "AGI", "MAG"]
 STAT_ALLOC_ATTRS = ["str_", "def_", "agi", "mag"]
@@ -184,6 +186,13 @@ class App:
         self.part_idx = 0
         self._part_targets = []
 
+        # Revive state
+        self.revive_idx = 0
+
+        # Give to NPC state
+        self.give_npc_idx = 0
+        self.give_npc_item = None
+
         # NPC command selection (unique NPCs)
         self.npc_cmd_idx = 0
         self._npc_cmd_queue = []
@@ -244,7 +253,19 @@ class App:
             self.inv_action_win.close()
             self.inv_win.open()
         elif new_state == STATE_INV_ACTION:
+            self.sub_win.close()
             self.inv_action_win.open()
+        elif new_state == STATE_INV_GIVE_NPC:
+            self.inv_action_win.close()
+            self.sub_win.open()
+        elif new_state == STATE_REVIVE:
+            self.town_win.close()
+            self.status_win.close()
+            self.battle_win.close()
+            self.inv_win.close()
+            self.inv_action_win.close()
+            self.shop_win.close()
+            self.sub_win.open()
         elif new_state == STATE_SHOP:
             self.sub_win.close()
             self.town_win.close()
@@ -358,6 +379,9 @@ class App:
             elif sel == "Stats":
                 self.stat_alloc_idx = 0
                 self._set_state(STATE_STAT_ALLOC)
+            elif sel == "Revive":
+                self.revive_idx = 0
+                self._set_state(STATE_REVIVE)
             elif sel == "Enter Dungeon":
                 self._enter_dungeon_fresh()
 
@@ -385,6 +409,31 @@ class App:
                 attr = STAT_ALLOC_ATTRS[self.stat_alloc_idx]
                 setattr(p, attr, getattr(p, attr) + 1)
                 p.bonus_points -= 1
+
+    # ---- Revive logic ----
+
+    def _upd_revive(self):
+        fallen = self.party.fallen
+        if not fallen:
+            if (pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE)
+                    or pyxel.btnp(pyxel.KEY_X)):
+                self._set_state(STATE_TOWN)
+            return
+        if pyxel.btnp(pyxel.KEY_X):
+            self._set_state(STATE_TOWN)
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.revive_idx = (self.revive_idx - 1) % len(fallen)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.revive_idx = (self.revive_idx + 1) % len(fallen)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            target = fallen[self.revive_idx]
+            cost = target.level * 100
+            if self.player.gold >= cost:
+                self.player.gold -= cost
+                target.hp = target.max_hp
+                target.mp = target.max_mp
+                self.revive_idx = 0
 
     # ---- Battle logic ----
 
@@ -429,29 +478,62 @@ class App:
         return alive[0]  # normal: attack first (player)
 
     def _npc_combat_action(self, npc, msgs):
-        if random.random() < 0.25:
-            msgs.append(f"{npc.name} acts on their own!")
-            p = npc.personality
-            if p == "reckless":
-                dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
+        p = npc.personality
+
+        if p == "reckless":
+            attack_skills = [s for s in npc.skills
+                             if s.effect_type == "attack" and npc.mp >= s.mp_cost]
+            if attack_skills and random.random() < 0.40:
+                skill = random.choice(attack_skills)
+                npc.mp -= skill.mp_cost
+                dmg = max(1, skill.power + npc.mag)
                 self.enemy.hp = max(0, self.enemy.hp - dmg)
                 msgs.append(
-                    f"[Reckless] {npc.name} attacks wildly! {self.enemy.name}: -{dmg} HP!")
-            elif p == "cowardly":
-                msgs.append(
-                    f"[Cowardly] {npc.name} hesitates and does nothing!")
-            elif p == "selfish":
-                msgs.append(
-                    f"[Selfish] {npc.name} tends to their own wounds! (skipped)")
+                    f"[Skill] {npc.name} uses {skill.name}! {self.enemy.name}: -{dmg} HP!")
             else:
                 dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
                 self.enemy.hp = max(0, self.enemy.hp - dmg)
                 msgs.append(
-                    f"{npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
-        else:
-            dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
-            self.enemy.hp = max(0, self.enemy.hp - dmg)
-            msgs.append(f"{npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
+                    f"[Reckless] {npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
+
+        elif p == "cowardly":
+            hurt = [m for m in self.party.alive if m.hp < m.max_hp * 0.5]
+            heal_skills = [s for s in npc.skills
+                           if s.effect_type == "heal" and npc.mp >= s.mp_cost]
+            if hurt and heal_skills and random.random() < 0.80:
+                skill = random.choice(heal_skills)
+                target = min(hurt, key=lambda m: m.hp)
+                npc.mp -= skill.mp_cost
+                heal = skill.power
+                target.hp = min(target.max_hp, target.hp + heal)
+                msgs.append(
+                    f"[Skill] {npc.name} uses {skill.name}! {target.name}: +{heal} HP!")
+            else:
+                msgs.append(
+                    f"[Cowardly] {npc.name} hesitates and does nothing!")
+
+        else:  # normal / selfish
+            affordable = [s for s in npc.skills if npc.mp >= s.mp_cost]
+            if affordable and random.random() < 0.20:
+                skill = random.choice(affordable)
+                npc.mp -= skill.mp_cost
+                if skill.effect_type == "attack":
+                    dmg = max(1, skill.power + npc.mag)
+                    self.enemy.hp = max(0, self.enemy.hp - dmg)
+                    msgs.append(
+                        f"[Skill] {npc.name} uses {skill.name}! {self.enemy.name}: -{dmg} HP!")
+                else:
+                    alive = self.party.alive
+                    if alive:
+                        target = min(alive, key=lambda m: m.hp)
+                        heal = skill.power
+                        target.hp = min(target.max_hp, target.hp + heal)
+                        msgs.append(
+                            f"[Skill] {npc.name} uses {skill.name}! {target.name}: +{heal} HP!")
+            else:
+                dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
+                self.enemy.hp = max(0, self.enemy.hp - dmg)
+                msgs.append(f"{npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
 
     def _handle_victory(self, msgs):
         exp = self.enemy.exp_reward
@@ -711,6 +793,10 @@ class App:
             self._upd_stat_alloc()
         elif self.state == STATE_BATTLE_TARGET_PART:
             self._upd_battle_target_part()
+        elif self.state == STATE_REVIVE:
+            self._upd_revive()
+        elif self.state == STATE_INV_GIVE_NPC:
+            self._upd_inv_give_npc()
 
     def _upd_dungeon(self):
         if pyxel.btnp(pyxel.KEY_T):
@@ -870,10 +956,15 @@ class App:
             self.inv_idx = (self.inv_idx + 1) % len(inv)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             item = inv[self.inv_idx]
-            usable = item.kind == "consumable" or isinstance(
-                item, GrimoireItem)
-            self.inv_actions = ["Use", "Drop", "Cancel"] if usable \
-                else ["Equip", "Drop", "Cancel"]
+            usable = item.kind == "consumable" or isinstance(item, GrimoireItem)
+            npc_members = [m for m in self.party.members[1:]
+                           if isinstance(m, NPCMember)]
+            if usable:
+                self.inv_actions = ["Use", "Drop", "Cancel"]
+            elif item.kind in ("weapon", "armor") and npc_members:
+                self.inv_actions = ["Equip", "Give to NPC", "Drop", "Cancel"]
+            else:
+                self.inv_actions = ["Equip", "Drop", "Cancel"]
             self.inv_action_idx = 0
             self._set_state(STATE_INV_ACTION)
 
@@ -898,6 +989,11 @@ class App:
                 self.player.inventory.remove(item)
                 self.inv_idx = min(self.inv_idx, max(
                     0, len(self.player.inventory) - 1))
+            elif sel == "Give to NPC":
+                self.give_npc_item = item
+                self.give_npc_idx = 0
+                self._set_state(STATE_INV_GIVE_NPC)
+                return
             self._set_state(STATE_INVENTORY)
 
     def _do_equip(self, item):
@@ -912,6 +1008,40 @@ class App:
             p.armor = item
         p.inventory.remove(item)
         self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
+
+    def _upd_inv_give_npc(self):
+        npc_members = [m for m in self.party.members[1:]
+                       if isinstance(m, NPCMember)]
+        if pyxel.btnp(pyxel.KEY_X):
+            self._set_state(STATE_INV_ACTION)
+            return
+        if not npc_members:
+            if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                self._set_state(STATE_INV_ACTION)
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.give_npc_idx = (self.give_npc_idx - 1) % len(npc_members)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.give_npc_idx = (self.give_npc_idx + 1) % len(npc_members)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            item = self.give_npc_item
+            npc = npc_members[self.give_npc_idx]
+            p = self.player
+            if item.kind == "weapon":
+                old_item = npc.weapon
+                p.inventory.remove(item)
+                npc.weapon = item
+                if old_item:
+                    p.inventory.append(old_item)
+            elif item.kind == "armor":
+                old_item = npc.armor
+                p.inventory.remove(item)
+                npc.armor = item
+                if old_item:
+                    p.inventory.append(old_item)
+            self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
+            self.give_npc_item = None
+            self._set_state(STATE_INVENTORY)
 
     def _do_use(self, item):
         p = self.player
@@ -961,8 +1091,10 @@ class App:
             self.draw_npcs()
             self.draw_status()
             self.draw_minimap()
-        elif self.state in (STATE_INVENTORY, STATE_INV_ACTION):
+        elif self.state in (STATE_INVENTORY, STATE_INV_ACTION, STATE_INV_GIVE_NPC):
             self._draw_inventory()
+        elif self.state == STATE_REVIVE:
+            self._draw_revive()
         elif self.state == STATE_SHOP:
             self._draw_shop()
         elif self.state == STATE_GUILD:
@@ -1200,6 +1332,22 @@ class App:
                     pyxel.text(cx, cy + i * 14, f"{cur} {act}", col)
             self.inv_action_win.draw(_action_content)
 
+        if self.state == STATE_INV_GIVE_NPC:
+            def _npc_sel_content(cx, cy, _cw, ch):
+                pyxel.text(cx, cy, "== Give to NPC ==", COL_YELLOW)
+                npc_members = [m for m in self.party.members[1:]
+                               if isinstance(m, NPCMember)]
+                if not npc_members:
+                    pyxel.text(cx, cy + 16, "No NPC in party.", COL_DARK_GRAY)
+                else:
+                    for i, npc in enumerate(npc_members):
+                        cursor = ">" if i == self.give_npc_idx else " "
+                        col = COL_YELLOW if i == self.give_npc_idx else COL_WHITE
+                        pyxel.text(cx, cy + 16 + i * 14,
+                                   f"{cursor} {npc.name}", col)
+                pyxel.text(cx, cy + ch - 8, "Z:Give  X:Cancel", COL_DARK_GRAY)
+            self.sub_win.draw(_npc_sel_content)
+
     def _draw_shop(self):
         pyxel.cls(COL_BLACK)
 
@@ -1248,6 +1396,30 @@ class App:
                        f"Gold: {self.player.gold}G", COL_YELLOW)
             pyxel.text(cx, cy + ch - 8,  "Z:Promote  X:Back", COL_DARK_GRAY)
         self.sub_win.draw(_guild_content)
+
+    def _draw_revive(self):
+        pyxel.cls(COL_BLACK)
+
+        def _content(cx, cy, cw, ch):
+            pyxel.text(cx, cy, "== TEMPLE of REVIVAL ==", COL_YELLOW)
+            fallen = self.party.fallen
+            if not fallen:
+                pyxel.text(cx, cy + 20, "Everyone is healthy.", COL_GREEN)
+                pyxel.text(cx, cy + ch - 8, "Z:Back", COL_DARK_GRAY)
+                return
+            for i, m in enumerate(fallen):
+                cost = m.level * 100
+                cursor = ">" if i == self.revive_idx else " "
+                affordable = self.player.gold >= cost
+                col = COL_WHITE if affordable else COL_DARK_GRAY
+                pyxel.text(cx, cy + 20 + i * 14, f"{cursor} {m.name}", col)
+                pyxel.text(cx + cw - 40, cy + 20 + i * 14, f"{cost}G",
+                           COL_YELLOW if affordable else COL_DARK_GRAY)
+            pyxel.text(cx, cy + ch - 16, f"Gold: {self.player.gold}G",
+                       COL_YELLOW)
+            pyxel.text(cx, cy + ch - 8, "Z:Revive  X:Back", COL_DARK_GRAY)
+
+        self.sub_win.draw(_content)
 
     def draw_3d_view(self):
         for d in range(MAX_DEPTH - 1, -1, -1):
