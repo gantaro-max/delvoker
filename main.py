@@ -1,6 +1,9 @@
 import pyxel
 import random
-from data import (Status, ENEMY_CATALOG, ITEM_CATALOG,
+import json
+from pathlib import Path
+from data import (Status, ENEMY_CATALOG, ITEM_CATALOG, JOBS,
+                  WeaponItem, ArmorItem, ConsumableItem,
                   make_enchanted_weapon, EnchantedWeapon,
                   make_enchanted_armor, EnchantedArmor,
                   NPCMember, Party, ATTR_AFFINITY,
@@ -82,6 +85,10 @@ STATE_HOME = 15
 STATE_ENDING = 16
 STATE_DUNGEON_SKILL = 17
 STATE_DUNGEON_SHOP = 18
+STATE_TITLE = 19
+STATE_JOB_SELECT = 20
+
+SAVE_FILE = "delvoker_save.json"
 
 INV_MAX = 8
 SHOP_KEYS = ["short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
@@ -134,6 +141,7 @@ HOME_RENOVATE_SLOTS = 5
 
 # BGM zone mapping: state → music index (0=town, 1=dungeon, 2=battle, -1=stop)
 _BGM_ZONES = {
+    STATE_TITLE: 0, STATE_JOB_SELECT: 0,
     STATE_TOWN: 0, STATE_TOWN_SUB: 0, STATE_GUILD: 0,
     STATE_STAT_ALLOC: 0, STATE_SHOP: 0, STATE_HOME: 0, STATE_REVIVE: 0,
     STATE_DUNGEON: 1, STATE_DUNGEON_SKILL: 1, STATE_DUNGEON_SHOP: 1,
@@ -155,8 +163,8 @@ def is_wall(x, y):
 
 
 class Player(Status):
-    def __init__(self):
-        super().__init__("warrior", "Hero")
+    def __init__(self, job_key="warrior"):
+        super().__init__(job_key, "Hero")
         self.inventory = []
         self.gold = 0
         self.warehouse = []
@@ -272,6 +280,11 @@ class App:
         self.game_cleared = False
         self.dungeon_skill_idx = 0
 
+        # Title / job select
+        self.title_idx = 0
+        self.job_select_idx = 0
+        self.unlocked_jobs = ["warrior"]
+
         # Dungeon merchant shop
         self.merchant_shop_idx = 0
         self._merchant_pos = None
@@ -300,7 +313,7 @@ class App:
 
         self.state = None
         self._init_audio()
-        self._set_state(STATE_TOWN)
+        self._set_state(STATE_TITLE)
 
         pyxel.run(self.update, self.draw)
 
@@ -331,7 +344,15 @@ class App:
 
     def _set_state(self, new_state):
         self.state = new_state
-        if new_state == STATE_TOWN:
+        if new_state in (STATE_TITLE, STATE_JOB_SELECT):
+            self.town_win.close()
+            self.status_win.close()
+            self.sub_win.close()
+            self.battle_win.close()
+            self.inv_win.close()
+            self.inv_action_win.close()
+            self.shop_win.close()
+        elif new_state == STATE_TOWN:
             self.sub_win.close()
             self.battle_win.close()
             self.inv_win.close()
@@ -446,6 +467,8 @@ class App:
     def _next_floor(self):
         global _dungeon_map
         self.dungeon_floor += 1
+        if self.dungeon_floor >= 5 and "thief" not in self.unlocked_jobs:
+            self.unlocked_jobs.append("thief")
         _dungeon_map = Map.generate_random(grave=self.grave, current_floor=self.dungeon_floor)
         self.px = _dungeon_map.start_x
         self.py = _dungeon_map.start_y
@@ -534,6 +557,48 @@ class App:
         self.town_sub_lines = lines
         self._dialog_return_state = STATE_DUNGEON
         self._set_state(STATE_TOWN_SUB)
+
+    # ---- Title / Job select ----
+
+    def _upd_title(self):
+        has_save = Path(SAVE_FILE).exists()
+        options = ["New Game", "Continue"] if has_save else ["New Game"]
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.title_idx = (self.title_idx - 1) % len(options)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.title_idx = (self.title_idx + 1) % len(options)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            sel = options[self.title_idx]
+            self.player = Player()
+            if sel == "Continue":
+                self.load_data()
+            else:
+                self.unlocked_jobs = ["warrior"]
+                self.game_cleared = False
+            self.job_select_idx = 0
+            self._set_state(STATE_JOB_SELECT)
+
+    def _upd_job_select(self):
+        jobs = self.unlocked_jobs
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.job_select_idx = (self.job_select_idx - 1) % len(jobs)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.job_select_idx = (self.job_select_idx + 1) % len(jobs)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            job_key = jobs[self.job_select_idx]
+            gold = self.player.gold
+            warehouse = self.player.warehouse
+            warehouse_max = self.player.warehouse_max
+            perm_stats = dict(self.player.perm_stats)
+            self.player = Player(job_key)
+            self.player.gold = gold
+            self.player.warehouse = warehouse
+            self.player.warehouse_max = warehouse_max
+            self.player.perm_stats = perm_stats
+            self.party = Party(self.player)
+            demo_npc = NPCMember("warrior", "Gard", "reckless")
+            self.party.add(demo_npc)
+            self._set_state(STATE_TOWN)
 
     # ---- Town logic ----
 
@@ -809,6 +874,9 @@ class App:
             msgs.append("The Archdemon is defeated!")
             msgs.append("You have conquered the dungeon!")
             self.game_cleared = True
+            if "mage" not in self.unlocked_jobs:
+                self.unlocked_jobs.append("mage")
+            self.save_data()
             self._show_msgs(msgs, STATE_ENDING)
         else:
             self._show_msgs(msgs, STATE_BATTLE_END)
@@ -1015,7 +1083,11 @@ class App:
         self.inv_action_win.update()
         self.shop_win.update()
 
-        if self.state == STATE_TOWN:
+        if self.state == STATE_TITLE:
+            self._upd_title()
+        elif self.state == STATE_JOB_SELECT:
+            self._upd_job_select()
+        elif self.state == STATE_TOWN:
             self._upd_town()
         elif self.state == STATE_TOWN_SUB:
             self._upd_town_sub()
@@ -1057,6 +1129,7 @@ class App:
     def _upd_dungeon(self):
         global _dungeon_map
         if pyxel.btnp(pyxel.KEY_T):
+            self.save_data()
             self._set_state(STATE_TOWN)
             return
         if pyxel.btnp(pyxel.KEY_I):
@@ -1262,6 +1335,7 @@ class App:
                 for m in self.party.members:
                     m.hp = m.max_hp
                     m.mp = m.max_mp
+                self.save_data()
                 self._set_state(STATE_TOWN)
             else:
                 self._set_state(STATE_DUNGEON)
@@ -1423,6 +1497,7 @@ class App:
             skill = utility[self.dungeon_skill_idx]
             if self.player.mp >= skill.mp_cost:
                 self.player.mp -= skill.mp_cost
+                self.save_data()
                 self._set_state(STATE_TOWN)
 
     # ---- Dungeon merchant shop ----
@@ -1452,6 +1527,7 @@ class App:
 
     def _upd_ending(self):
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            self.save_data()
             self._set_state(STATE_TOWN)
 
     # ---- Home logic ----
@@ -1547,6 +1623,94 @@ class App:
                 if p.gold >= cost:
                     p.gold -= cost
                     p.perm_stats[attr] += 1
+                    self.save_data()
+
+    # ---- Persistence ----
+
+    @staticmethod
+    def _serialize_item(item):
+        if isinstance(item, EnchantedWeapon):
+            prefix = item.prefix
+            return {"kind": "enchanted_weapon",
+                    "base_name": item._base_name,
+                    "base_dc": item.dice_count - (prefix["dice_count_mod"] if prefix else 0),
+                    "base_ds": item.dice_sides - (prefix["dice_sides_mod"] if prefix else 0),
+                    "base_sb": item.static_bonus - (prefix["static_bonus_mod"] if prefix else 0),
+                    "enchant_bonus": item.enchant_bonus, "value": item.value,
+                    "prefix": prefix, "suffix": item.suffix}
+        if isinstance(item, WeaponItem):
+            return {"kind": "weapon",
+                    "name": item.name, "dice_count": item.dice_count,
+                    "dice_sides": item.dice_sides, "static_bonus": item.static_bonus,
+                    "enchant_bonus": item.enchant_bonus, "value": item.value,
+                    "attribute": item.attribute}
+        if isinstance(item, EnchantedArmor):
+            prefix = item.prefix
+            return {"kind": "enchanted_armor",
+                    "base_name": item._base_name,
+                    "base_def": item.def_bonus - (prefix["def_bonus_mod"] if prefix else 0),
+                    "value": item.value, "prefix": prefix, "suffix": item.suffix}
+        if isinstance(item, ArmorItem):
+            return {"kind": "armor",
+                    "name": item.name, "def_bonus": item.def_bonus, "value": item.value}
+        if isinstance(item, GrimoireItem):
+            return {"kind": "grimoire",
+                    "name": item.name, "skill_name": item.skill_name,
+                    "mp_cost": item.mp_cost, "effect_type": item.effect_type,
+                    "power": item.power, "value": item.value, "is_utility": item.is_utility}
+        return {"kind": "consumable",
+                "name": item.name, "hp_restore": getattr(item, "hp_restore", 0),
+                "mp_restore": getattr(item, "mp_restore", 0), "value": item.value,
+                "cure_status": getattr(item, "cure_status", "")}
+
+    @staticmethod
+    def _deserialize_item(d):
+        k = d.get("kind", "consumable")
+        if k == "enchanted_weapon":
+            base = WeaponItem(d["base_name"], d["base_dc"], d["base_ds"],
+                              d.get("base_sb", 0), d.get("enchant_bonus", 0), d.get("value", 0))
+            return EnchantedWeapon(base, d.get("prefix"), d.get("suffix"))
+        if k == "weapon":
+            return WeaponItem(d["name"], d["dice_count"], d["dice_sides"],
+                              d.get("static_bonus", 0), d.get("enchant_bonus", 0),
+                              d.get("value", 0), d.get("attribute"))
+        if k == "enchanted_armor":
+            base = ArmorItem(d["base_name"], d["base_def"], d.get("value", 0))
+            return EnchantedArmor(base, d.get("prefix"), d.get("suffix"))
+        if k == "armor":
+            return ArmorItem(d["name"], d["def_bonus"], d.get("value", 0))
+        if k == "grimoire":
+            return GrimoireItem(d["name"], d["skill_name"], d.get("mp_cost", 5),
+                                d.get("effect_type", "attack"), d.get("power", 10),
+                                d.get("value", 0), d.get("is_utility", False))
+        return ConsumableItem(d["name"], d.get("hp_restore", 0), d.get("mp_restore", 0),
+                              d.get("value", 0), d.get("cure_status", ""))
+
+    def save_data(self):
+        data = {
+            "gold": self.player.gold,
+            "warehouse": [self._serialize_item(it) for it in self.player.warehouse],
+            "warehouse_max": self.player.warehouse_max,
+            "perm_stats": dict(self.player.perm_stats),
+            "unlocked_jobs": list(self.unlocked_jobs),
+            "game_cleared": self.game_cleared,
+        }
+        with open(SAVE_FILE, "w", encoding="ascii") as f:
+            json.dump(data, f, ensure_ascii=True)
+
+    def load_data(self):
+        try:
+            with open(SAVE_FILE, encoding="ascii") as f:
+                data = json.load(f)
+            self.player.gold = data.get("gold", 0)
+            self.player.warehouse = [self._deserialize_item(d)
+                                     for d in data.get("warehouse", [])]
+            self.player.warehouse_max = data.get("warehouse_max", 10)
+            self.player.perm_stats = data.get("perm_stats", {"str": 0, "def": 0, "mag": 0})
+            self.unlocked_jobs = data.get("unlocked_jobs", ["warrior"])
+            self.game_cleared = data.get("game_cleared", False)
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            pass
 
     # ---- Shop logic ----
 
@@ -1572,7 +1736,11 @@ class App:
         if self.shake_timer > 0:
             pyxel.camera(random.randint(-2, 2), random.randint(-2, 2))
         pyxel.cls(COL_NAVY)
-        if self.state == STATE_TOWN:
+        if self.state == STATE_TITLE:
+            self._draw_title()
+        elif self.state == STATE_JOB_SELECT:
+            self._draw_job_select()
+        elif self.state == STATE_TOWN:
             self._draw_town()
         elif self.state == STATE_TOWN_SUB:
             self._draw_town_sub()
@@ -1899,6 +2067,36 @@ class App:
         if len(p.inventory) >= INV_MAX:
             pyxel.text(px + 64, py + ph - 18, "Bag Full!", COL_RED)
         pyxel.text(px + 4, py + ph - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
+
+    def _draw_title(self):
+        pyxel.cls(COL_BLACK)
+        title = "D E L V O K E R"
+        pyxel.text((SCREEN_W - len(title) * 4) // 2, 55, title, COL_YELLOW)
+        sub = "Retro Dungeon Hack & Slash"
+        pyxel.text((SCREEN_W - len(sub) * 4) // 2, 70, sub, COL_LIGHT_GRAY)
+        has_save = Path(SAVE_FILE).exists()
+        options = ["New Game", "Continue"] if has_save else ["New Game"]
+        for i, opt in enumerate(options):
+            cur = ">" if i == self.title_idx else " "
+            col = COL_YELLOW if i == self.title_idx else COL_WHITE
+            x = (SCREEN_W - (len(opt) + 2) * 4) // 2
+            pyxel.text(x, 108 + i * 16, f"{cur} {opt}", col)
+        pyxel.text(4, SCREEN_H - 14, "Z/Space:Select  Q:Quit", COL_DARK_GRAY)
+
+    def _draw_job_select(self):
+        pyxel.cls(COL_BLACK)
+        hdr = "SELECT YOUR JOB"
+        pyxel.text((SCREEN_W - len(hdr) * 4) // 2, 30, hdr, COL_YELLOW)
+        for i, job_key in enumerate(self.unlocked_jobs):
+            job = JOBS[job_key]
+            cur = ">" if i == self.job_select_idx else " "
+            col = COL_YELLOW if i == self.job_select_idx else COL_WHITE
+            pyxel.text(72, 60 + i * 24, f"{cur} {job.name}", col)
+            start_hp = job.hp_die * 3
+            start_mp = job.mp_die * 2 if job.mp_die > 0 else 0
+            mp_str = f" MP:{start_mp}" if start_mp > 0 else ""
+            pyxel.text(80, 70 + i * 24, f"HP:{start_hp}{mp_str}", COL_LIGHT_GRAY)
+        pyxel.text(4, SCREEN_H - 14, "Z/Space:Select", COL_DARK_GRAY)
 
     def _draw_ending(self):
         pyxel.cls(COL_BLACK)
