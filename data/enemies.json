@@ -17,5 +17,30 @@
                   "ai_type": "support", "telegraph_message": "The Orc Chief is charging power!",
                   "parts": [
                     {"name": "Right Arm", "hp_ratio": 0.4, "weakness": "fire", "drop_flag": "chief_gauntlet"}
-                  ]}
+                  ]},
+    "revenant":  {"name": "Revenant", "hp": 40, "def": 2, "exp_reward": 30, "gold_reward": 0,
+                  "weapon": {"name": "Spectral Claw", "dice_count": 1, "dice_sides": 8, "static_bonus": 1},
+                  "weaknesses": ["holy"], "ai_type": "normal"},
+    "wraith":    {"name": "Wraith",    "hp": 35, "def": 2, "exp_reward": 35, "gold_reward": 20,
+                  "weapon": {"name": "Soul Touch",  "dice_count": 1, "dice_sides": 8, "static_bonus": 2},
+                  "weaknesses": ["holy"], "resistances": ["fire", "ice"], "ai_type": "ranged"},
+    "golem":     {"name": "Golem",     "hp": 80, "def": 5, "exp_reward": 60, "gold_reward": 30,
+                  "weapon": {"name": "Stone Fist",  "dice_count": 2, "dice_sides": 6, "static_bonus": 3},
+                  "ai_type": "normal"},
+    "mimic":     {"name": "Mimic",     "hp": 30, "def": 3, "exp_reward": 40, "gold_reward": 50,
+                  "weapon": {"name": "Chomp",       "dice_count": 2, "dice_sides": 4, "static_bonus": 2},
+                  "ai_type": "normal"},
+    "wyvern":    {"name": "Wyvern",    "hp": 50, "def": 2, "exp_reward": 70, "gold_reward": 40,
+                  "weapon": {"name": "Talon Strike","dice_count": 3, "dice_sides": 6, "static_bonus": 4},
+                  "weaknesses": ["ice"], "ai_type": "ranged"},
+    "dungeon_master": {"name": "Dungeon Master", "hp": 150, "def": 6, "exp_reward": 500, "gold_reward": 0,
+                  "weapon": {"name": "Dark Annihilation", "dice_count": 3, "dice_sides": 8, "static_bonus": 5},
+                  "resistances": ["fire", "ice", "poison", "holy"],
+                  "ai_type": "support",
+                  "telegraph_message": "The Dungeon Master is gathering dark power!"},
+    "archdemon": {"name": "Archdemon", "hp": 300, "def": 8, "exp_reward": 1000, "gold_reward": 0,
+                  "weapon": {"name": "Void Annihilation", "dice_count": 4, "dice_sides": 8, "static_bonus": 8},
+                  "resistances": ["fire", "ice", "poison", "holy"],
+                  "ai_type": "support",
+                  "telegraph_message": "The Archdemon channels hellfire!"}
 }
