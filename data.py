@@ -166,28 +166,30 @@ class EnchantedArmor(ArmorItem):
 
 
 class ConsumableItem(Item):
-    def __init__(self, name, hp_restore=0, mp_restore=0, value=0):
+    def __init__(self, name, hp_restore=0, mp_restore=0, value=0, cure_status=""):
         super().__init__(name, "consumable", value)
         self.hp_restore = hp_restore
         self.mp_restore = mp_restore
+        self.cure_status = cure_status
 
     def clone(self):
-        return ConsumableItem(self.name, self.hp_restore, self.mp_restore, self.value)
+        return ConsumableItem(self.name, self.hp_restore, self.mp_restore, self.value, self.cure_status)
 
 
 class GrimoireItem(ConsumableItem):
     """使用するとスキルを習得できる魔導書。"""
 
-    def __init__(self, name, skill_name, mp_cost=5, effect_type="attack", power=10, value=0):
+    def __init__(self, name, skill_name, mp_cost=5, effect_type="attack", power=10, value=0, is_utility=False):
         super().__init__(name, 0, 0, value)
         self.skill_name  = skill_name
         self.mp_cost     = mp_cost
         self.effect_type = effect_type
         self.power       = power
+        self.is_utility  = is_utility
 
     def clone(self):
         return GrimoireItem(self.name, self.skill_name, self.mp_cost,
-                            self.effect_type, self.power, self.value)
+                            self.effect_type, self.power, self.value, self.is_utility)
 
 
 def _build_item(raw):
@@ -202,13 +204,15 @@ def _build_item(raw):
         return ArmorItem(raw["name"], raw["def_bonus"], raw.get("value", 0))
     if t == "consumable":
         return ConsumableItem(
-            raw["name"], raw.get("hp_restore", 0), raw.get("mp_restore", 0), raw.get("value", 0)
+            raw["name"], raw.get("hp_restore", 0), raw.get("mp_restore", 0), raw.get("value", 0),
+            raw.get("cure_status", "")
         )
     if t == "grimoire":
         return GrimoireItem(
             raw["name"], raw["skill_name"],
             raw.get("mp_cost", 5), raw.get("effect_type", "attack"),
             raw.get("power", 10), raw.get("value", 0),
+            raw.get("is_utility", False),
         )
     raise ValueError(f"Unknown item type: {t}")
 
@@ -282,11 +286,12 @@ MAX_SKILLS = 4
 class Skill:
     """プレイヤーが魔導書から習得できるアクティブスキル。"""
 
-    def __init__(self, name, mp_cost=5, effect_type="attack", power=10):
+    def __init__(self, name, mp_cost=5, effect_type="attack", power=10, is_utility=False):
         self.name        = name
         self.mp_cost     = mp_cost
-        self.effect_type = effect_type  # "attack" | "heal"
+        self.effect_type = effect_type  # "attack" | "heal" | "teleport"
         self.power       = power
+        self.is_utility  = is_utility
 
 
 def make_enchanted_armor(base_key: str) -> EnchantedArmor:

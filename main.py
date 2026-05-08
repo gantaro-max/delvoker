@@ -35,6 +35,7 @@ COL_PEACH = 15
 VIEW_H = 176
 STATUS_Y = VIEW_H
 MAX_DEPTH = 4
+MAX_FLOOR = 10
 
 FRAMES = [
     (0,   0,   255, 175),
@@ -76,14 +77,43 @@ STATE_STAT_ALLOC = 11
 STATE_BATTLE_TARGET_PART = 12
 STATE_REVIVE = 13
 STATE_INV_GIVE_NPC = 14
+STATE_HOME = 15
+STATE_ENDING = 16
+STATE_DUNGEON_SKILL = 17
 
 INV_MAX = 8
 SHOP_KEYS = ["short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
-             "herb", "potion", "ether", "grimoire_fire", "grimoire_heal"]
+             "herb", "potion", "ether", "antidote",
+             "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return"]
 PROMOTION_COST = 1000
-WEAPON_DROP_POOL = ["short_sword", "long_sword", "staff"]
-ITEM_DROP_POOL = ["leather_armor", "herb", "potion"]
 DROP_RATE = 0.35
+
+# Tier-based drop pools keyed by floor range (1-indexed upper bound inclusive)
+_DROP_TIERS = [
+    (3,  ["old_dagger", "short_sword", "staff"],              ["leather_armor", "herb", "potion"]),
+    (6,  ["long_sword", "chain_mail"],                        ["potion", "ether", "grimoire_ice"]),
+    (10, ["steel_sword", "mithril_sword", "steel_plate"],     ["ether", "grimoire_poison"]),
+]
+
+def _drop_pools(floor):
+    """Return (weapon_pool, item_pool) for the given dungeon floor."""
+    for cap, wp, ip in _DROP_TIERS:
+        if floor <= cap:
+            return wp, ip
+    return _DROP_TIERS[-1][1], _DROP_TIERS[-1][2]
+
+# Tier-based random encounter pools
+_ENCOUNTER_TIERS = [
+    (3,  ["slime", "bat", "goblin"]),
+    (6,  ["skeleton", "goblin", "wraith"]),
+    (10, ["golem", "wyvern", "wraith"]),
+]
+
+def _encounter_pool(floor):
+    for cap, pool in _ENCOUNTER_TIERS:
+        if floor <= cap:
+            return pool
+    return _ENCOUNTER_TIERS[-1][1]
 
 ENCOUNTER_RATE = 0.15
 FLEE_RATE = 0.5
@@ -93,7 +123,6 @@ TOWN_MENU = ["Inn", "Guild", "Shop", "Stats", "Revive", "Home", "Enter Dungeon"]
 STAT_ALLOC_NAMES = ["STR", "DEF", "AGI", "MAG"]
 STAT_ALLOC_ATTRS = ["str_", "def_", "agi", "mag"]
 
-STATE_HOME = 15
 HOME_MENU = ["Warehouse", "Renovate", "Training", "Back"]
 HOME_TRAIN_STATS = ["STR", "DEF", "MAG"]
 HOME_TRAIN_ATTRS = ["str", "def", "mag"]
@@ -226,6 +255,10 @@ class App:
         self.grave = None
         self.is_grave_battle = False
 
+        # Ending / skill use
+        self.game_cleared = False
+        self.dungeon_skill_idx = 0
+
         # Visual flash on item loss
         self.flash_timer = 0
         self.lost_item_name = ""
@@ -319,6 +352,17 @@ class App:
             self.shop_win.close()
             self.sub_win.title = "HOME"
             self.sub_win.open()
+        elif new_state == STATE_DUNGEON_SKILL:
+            self.sub_win.title = "SKILLS"
+            self.sub_win.open()
+        elif new_state == STATE_ENDING:
+            self.town_win.close()
+            self.status_win.close()
+            self.sub_win.close()
+            self.battle_win.close()
+            self.inv_win.close()
+            self.inv_action_win.close()
+            self.shop_win.close()
 
     def wall_at(self, fwd, side):
         dx, dy = DIR_VECTORS[self.dir]
@@ -356,7 +400,7 @@ class App:
             if _dungeon_map.tile_at(x, y) == TILE_FLOOR
             and not (x == self.px and y == self.py)
         ]
-        npc_pool = ["slime", "goblin", "skeleton"]
+        npc_pool = _encounter_pool(self.dungeon_floor)
         count = random.randint(2, 4)
         positions = random.sample(floor_tiles, min(count, len(floor_tiles)))
         self.npcs = [NPC(random.choice(npc_pool), px, py)
@@ -368,11 +412,14 @@ class App:
         if len(self.player.inventory) >= INV_MAX:
             lines = ["A chest! Bag is full.", "Item was left behind..."]
         else:
+            wp, ip = _drop_pools(self.dungeon_floor)
             if random.random() < 0.6:
-                drop_key = random.choice(WEAPON_DROP_POOL)
-                item = make_enchanted_weapon(drop_key)
+                drop_key = random.choice(wp)
+                base = ITEM_CATALOG[drop_key]
+                item = make_enchanted_weapon(drop_key) if base.kind == "weapon" else (
+                    make_enchanted_armor(drop_key) if base.kind == "armor" else base.clone())
             else:
-                drop_key = random.choice(ITEM_DROP_POOL)
+                drop_key = random.choice(ip)
                 base = ITEM_CATALOG[drop_key]
                 item = make_enchanted_armor(
                     drop_key) if base.kind == "armor" else base.clone()
@@ -479,7 +526,7 @@ class App:
 
     def _start_battle(self, enemy_key=None):
         key = enemy_key if enemy_key else random.choice(
-            list(ENEMY_CATALOG.keys()))
+            _encounter_pool(self.dungeon_floor))
         self.enemy = Enemy(ENEMY_CATALOG[key])
         self._current_enemy_key = key
         self.enemy_telegraphing = False
@@ -599,11 +646,18 @@ class App:
                     parts.append("AGI+1")
                 msgs.append("  ".join(parts))
         if random.random() < DROP_RATE:
+            wp, ip = _drop_pools(self.dungeon_floor)
             if random.random() < 0.6:
-                drop_key = random.choice(WEAPON_DROP_POOL)
-                drop_item = make_enchanted_weapon(drop_key)
+                drop_key = random.choice(wp)
+                base_item = ITEM_CATALOG[drop_key]
+                if base_item.kind == "weapon":
+                    drop_item = make_enchanted_weapon(drop_key)
+                elif base_item.kind == "armor":
+                    drop_item = make_enchanted_armor(drop_key)
+                else:
+                    drop_item = base_item.clone()
             else:
-                drop_key = random.choice(ITEM_DROP_POOL)
+                drop_key = random.choice(ip)
                 base_item = ITEM_CATALOG[drop_key]
                 if base_item.kind == "armor":
                     drop_item = make_enchanted_armor(drop_key)
@@ -642,7 +696,18 @@ class App:
             self.is_grave_battle = False
 
         self.battle_won = True
-        self._show_msgs(msgs, STATE_BATTLE_END)
+        if self._current_enemy_key == "dungeon_master":
+            msgs.append("The Dungeon Master is defeated!")
+            msgs.append("A path to the deeper floors opens...")
+            self._next_floor()
+            self._show_msgs(msgs, STATE_BATTLE_END)
+        elif self._current_enemy_key == "archdemon":
+            msgs.append("The Archdemon is defeated!")
+            msgs.append("You have conquered the dungeon!")
+            self.game_cleared = True
+            self._show_msgs(msgs, STATE_ENDING)
+        else:
+            self._show_msgs(msgs, STATE_BATTLE_END)
 
     def _run_auto_and_enemy(self, msgs):
         for npc in self.party.alive[1:]:
@@ -788,6 +853,9 @@ class App:
             self._player_attack(part_name)
 
     def _try_flee(self):
+        if self._current_enemy_key in ("dungeon_master", "archdemon"):
+            self._enemy_turn(["You cannot escape!"])
+            return
         if random.random() < FLEE_RATE:
             self._show_msgs(["Got away safely!"], STATE_DUNGEON)
         else:
@@ -853,8 +921,13 @@ class App:
             self._upd_inv_give_npc()
         elif self.state == STATE_HOME:
             self._upd_home()
+        elif self.state == STATE_DUNGEON_SKILL:
+            self._upd_dungeon_skill()
+        elif self.state == STATE_ENDING:
+            self._upd_ending()
 
     def _upd_dungeon(self):
+        global _dungeon_map
         if pyxel.btnp(pyxel.KEY_T):
             self._set_state(STATE_TOWN)
             return
@@ -862,6 +935,10 @@ class App:
             self.pre_inv_state = STATE_DUNGEON
             self.inv_idx = 0
             self._set_state(STATE_INVENTORY)
+            return
+        if pyxel.btnp(pyxel.KEY_S):
+            self.dungeon_skill_idx = 0
+            self._set_state(STATE_DUNGEON_SKILL)
             return
         dx, dy = DIR_VECTORS[self.dir]
         moved = False
@@ -885,10 +962,30 @@ class App:
             tile = _dungeon_map.tile_at(
                 self.px, self.py) if _dungeon_map else 0
             if tile == TILE_STAIRS:
-                self._next_floor()
+                if self.dungeon_floor == 5:
+                    self._start_battle("dungeon_master")
+                    self._show_msgs(
+                        ["B5F - Midpoint of darkness.",
+                         "The Dungeon Master emerges!"],
+                        STATE_BATTLE_CMD
+                    )
+                elif self.dungeon_floor >= MAX_FLOOR:
+                    self._start_battle("archdemon")
+                    self._show_msgs(
+                        [f"B{self.dungeon_floor}F - The deepest floor.",
+                         "The Archdemon rises from the abyss!"],
+                        STATE_BATTLE_CMD
+                    )
+                else:
+                    self._next_floor()
                 return
             if tile == TILE_CHEST:
-                self._open_chest()
+                if random.random() < 0.2:
+                    _dungeon_map.set_tile(self.px, self.py, TILE_FLOOR)
+                    self._start_battle("mimic")
+                    self._show_msgs(["The chest opens... It's a Mimic!"], STATE_BATTLE_CMD)
+                else:
+                    self._open_chest()
                 return
             if tile == TILE_TRAP_SPIKE:
                 dmg = random.randint(5, 10)
@@ -1005,7 +1102,7 @@ class App:
             self.msg_idx += 1
             if self.msg_idx >= len(self.messages):
                 ns = self.next_state
-                if ns in (STATE_DUNGEON, STATE_TOWN):
+                if ns in (STATE_DUNGEON, STATE_TOWN, STATE_ENDING):
                     self.enemy = None
                     self._set_state(ns)
                 else:
@@ -1129,7 +1226,8 @@ class App:
         p = self.player
         if isinstance(item, GrimoireItem):
             new_skill = Skill(item.skill_name, item.mp_cost,
-                              item.effect_type, item.power)
+                              item.effect_type, item.power,
+                              getattr(item, "is_utility", False))
             if len(p.skills) >= MAX_SKILLS:
                 p.skills.pop(0)
             p.skills.append(new_skill)
@@ -1139,8 +1237,36 @@ class App:
             p.mp = min(p.max_mp, p.mp + item.mp_restore)
             if heal_hp > 0:
                 self.add_popup(f"+{heal_hp}", 46, 130, COL_GREEN)
+            cure = getattr(item, "cure_status", "")
+            if cure and cure in p.status_effects:
+                p.status_effects[cure] = 0
         p.inventory.remove(item)
         self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
+
+    # ---- Dungeon skill use ----
+
+    def _upd_dungeon_skill(self):
+        utility = [s for s in self.player.skills if s.effect_type == "teleport"]
+        if pyxel.btnp(pyxel.KEY_X):
+            self._set_state(STATE_DUNGEON)
+            return
+        if not utility:
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.dungeon_skill_idx = (self.dungeon_skill_idx - 1) % len(utility)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.dungeon_skill_idx = (self.dungeon_skill_idx + 1) % len(utility)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            skill = utility[self.dungeon_skill_idx]
+            if self.player.mp >= skill.mp_cost:
+                self.player.mp -= skill.mp_cost
+                self._set_state(STATE_TOWN)
+
+    # ---- Ending ----
+
+    def _upd_ending(self):
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            self._set_state(STATE_TOWN)
 
     # ---- Home logic ----
 
@@ -1267,6 +1393,14 @@ class App:
             self.draw_npcs()
             self.draw_status()
             self.draw_minimap()
+        elif self.state == STATE_DUNGEON_SKILL:
+            self.draw_3d_view()
+            self.draw_npcs()
+            self.draw_status()
+            self.draw_minimap()
+            self._draw_dungeon_skill()
+        elif self.state == STATE_ENDING:
+            self._draw_ending()
         elif self.state in (STATE_INVENTORY, STATE_INV_ACTION, STATE_INV_GIVE_NPC):
             self._draw_inventory()
         elif self.state == STATE_HOME:
@@ -1526,6 +1660,45 @@ class App:
                 pyxel.text(cx, cy + ch - 8, "Z:Give  X:Cancel", COL_DARK_GRAY)
             self.sub_win.draw(_npc_sel_content)
 
+    def _draw_dungeon_skill(self):
+        def _content(cx, cy, cw, ch):
+            p = self.player
+            pyxel.text(cx, cy, "== DUNGEON SKILLS ==", COL_YELLOW)
+            pyxel.text(cx, cy + 12, f"MP: {p.mp}/{p.max_mp}", COL_GREEN)
+            utility = [s for s in p.skills if s.effect_type == "teleport"]
+            if not utility:
+                pyxel.text(cx, cy + 28, "No utility skills.", COL_DARK_GRAY)
+            else:
+                for i, sk in enumerate(utility):
+                    cur = ">" if i == self.dungeon_skill_idx else " "
+                    can_use = p.mp >= sk.mp_cost
+                    col = COL_YELLOW if i == self.dungeon_skill_idx else (
+                        COL_WHITE if can_use else COL_DARK_GRAY)
+                    pyxel.text(cx, cy + 28 + i * 14,
+                               f"{cur} {sk.name}  MP:{sk.mp_cost}", col)
+            pyxel.text(cx, cy + ch - 8, "Z:Use  X:Cancel", COL_DARK_GRAY)
+        self.sub_win.draw(_content)
+
+    def _draw_ending(self):
+        pyxel.cls(COL_BLACK)
+        p = self.player
+        lines = [
+            ("CONGRATULATIONS!", COL_YELLOW, 40),
+            ("You conquered the Dungeon!", COL_WHITE, 60),
+            ("The Archdemon is slain!", COL_GREEN, 76),
+            ("", COL_WHITE, 92),
+            (f"Name:  {p.name}", COL_WHITE, 100),
+            (f"Level: {p.level}", COL_WHITE, 112),
+            (f"Floor: B{self.dungeon_floor}F", COL_PEACH, 124),
+            (f"Gold:  {p.gold}G", COL_YELLOW, 136),
+        ]
+        for text, col, y in lines:
+            if text:
+                x = (SCREEN_W - len(text) * 4) // 2
+                pyxel.text(x, y, text, col)
+        hint = "Z: Return to Town"
+        pyxel.text((SCREEN_W - len(hint) * 4) // 2, 170, hint, COL_DARK_GRAY)
+
     def _draw_home(self):
         pyxel.cls(COL_BLACK)
         sub = self.home_sub
@@ -1773,7 +1946,7 @@ class App:
         pyxel.text(SCREEN_W - 4 - len(floor_str) * 4,
                    STATUS_Y + 28, floor_str, COL_YELLOW)
         pyxel.text(4, STATUS_Y + 40,
-                   "Arrow:Move  T:Town  I:Item  Q:Quit", COL_DARK_GRAY)
+                   "Arrow:Move  T:Town  I:Item  S:Skill  Q:Quit", COL_DARK_GRAY)
 
 
 if __name__ == "__main__":

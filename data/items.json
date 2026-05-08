@@ -3,12 +3,19 @@
     "short_sword":     {"type": "weapon",     "name": "Short Sword",     "dice_count": 1, "dice_sides": 8,  "static_bonus": 1, "value": 50},
     "long_sword":      {"type": "weapon",     "name": "Long Sword",      "dice_count": 1, "dice_sides": 10, "static_bonus": 2, "value": 150},
     "staff":           {"type": "weapon",     "name": "Staff",           "dice_count": 1, "dice_sides": 4,  "static_bonus": 0, "value": 20},
+    "steel_sword":     {"type": "weapon",     "name": "Steel Sword",     "dice_count": 2, "dice_sides": 8,  "static_bonus": 3, "value": 300},
+    "mithril_sword":   {"type": "weapon",     "name": "Mithril Sword",   "dice_count": 2, "dice_sides": 10, "static_bonus": 5, "value": 600},
     "leather_armor":   {"type": "armor",      "name": "Leather Armor",   "def_bonus": 2,  "value": 30},
     "chain_mail":      {"type": "armor",      "name": "Chain Mail",      "def_bonus": 4,  "value": 100},
+    "steel_plate":     {"type": "armor",      "name": "Steel Plate",     "def_bonus": 6,  "value": 250},
     "herb":            {"type": "consumable", "name": "Herb",            "hp_restore": 10, "mp_restore": 0,  "value": 15},
     "potion":          {"type": "consumable", "name": "Potion",          "hp_restore": 30, "mp_restore": 0,  "value": 50},
     "ether":           {"type": "consumable", "name": "Ether",           "hp_restore": 0,  "mp_restore": 15, "value": 60},
+    "antidote":        {"type": "consumable", "name": "Antidote",        "hp_restore": 0,  "mp_restore": 0,  "cure_status": "poison", "value": 30},
     "grimoire_fire":   {"type": "grimoire",   "name": "Grimoire: Fire",  "skill_name": "Fire Blast",    "mp_cost": 5, "effect_type": "attack", "power": 12, "value": 500},
     "grimoire_heal":   {"type": "grimoire",   "name": "Grimoire: Heal",  "skill_name": "Healing Light", "mp_cost": 4, "effect_type": "heal",   "power": 20, "value": 400},
-    "chief_gauntlet":  {"type": "armor",      "name": "Chief Gauntlet",  "def_bonus": 5, "value": 300}
+    "grimoire_ice":    {"type": "grimoire",   "name": "Grimoire: Ice",   "skill_name": "Ice Lance",     "mp_cost": 5, "effect_type": "attack", "power": 15, "value": 600},
+    "grimoire_poison": {"type": "grimoire",   "name": "Grimoire: Poison","skill_name": "Poison Mist",   "mp_cost": 4, "effect_type": "attack", "power": 10, "value": 500},
+    "chief_gauntlet":  {"type": "armor",      "name": "Chief Gauntlet",  "def_bonus": 5, "value": 300},
+    "grimoire_return": {"type": "grimoire",   "name": "Grimoire: Return","skill_name": "Teleport", "mp_cost": 10, "effect_type": "teleport", "power": 0, "value": 800, "is_utility": true}
 }
