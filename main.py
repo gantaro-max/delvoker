@@ -6,7 +6,8 @@ from data import (Status, ENEMY_CATALOG, ITEM_CATALOG,
                   NPCMember, Party, ATTR_AFFINITY,
                   Skill, MAX_SKILLS, GrimoireItem,
                   Map, TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
-                  TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR, Grave)
+                  TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
+                  TILE_FOUNTAIN, TILE_MERCHANT, Grave)
 from window import Window
 from npc import NPC
 
@@ -80,11 +81,13 @@ STATE_INV_GIVE_NPC = 14
 STATE_HOME = 15
 STATE_ENDING = 16
 STATE_DUNGEON_SKILL = 17
+STATE_DUNGEON_SHOP = 18
 
 INV_MAX = 8
 SHOP_KEYS = ["short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
              "herb", "potion", "ether", "antidote", "scroll_mapping",
              "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return"]
+MERCHANT_KEYS = ["elixir", "potion", "ether", "antidote", "holy_scroll", "grimoire_heal"]
 PROMOTION_COST = 1000
 DROP_RATE = 0.35
 
@@ -133,7 +136,7 @@ HOME_RENOVATE_SLOTS = 5
 _BGM_ZONES = {
     STATE_TOWN: 0, STATE_TOWN_SUB: 0, STATE_GUILD: 0,
     STATE_STAT_ALLOC: 0, STATE_SHOP: 0, STATE_HOME: 0, STATE_REVIVE: 0,
-    STATE_DUNGEON: 1, STATE_DUNGEON_SKILL: 1,
+    STATE_DUNGEON: 1, STATE_DUNGEON_SKILL: 1, STATE_DUNGEON_SHOP: 1,
     STATE_BATTLE_CMD: 2, STATE_BATTLE_MSG: 2, STATE_BATTLE_END: 2,
     STATE_BATTLE_NPC_CMD: 2, STATE_BATTLE_TARGET_PART: 2,
     STATE_ENDING: -1,
@@ -269,6 +272,10 @@ class App:
         self.game_cleared = False
         self.dungeon_skill_idx = 0
 
+        # Dungeon merchant shop
+        self.merchant_shop_idx = 0
+        self._merchant_pos = None
+
         # Visual flash on item loss
         self.flash_timer = 0
         self.lost_item_name = ""
@@ -392,6 +399,14 @@ class App:
         elif new_state == STATE_DUNGEON_SKILL:
             self.sub_win.title = "SKILLS"
             self.sub_win.open()
+        elif new_state == STATE_DUNGEON_SHOP:
+            self.town_win.close()
+            self.status_win.close()
+            self.sub_win.close()
+            self.battle_win.close()
+            self.inv_win.close()
+            self.inv_action_win.close()
+            self.shop_win.close()
         elif new_state == STATE_ENDING:
             self.town_win.close()
             self.status_win.close()
@@ -464,6 +479,31 @@ class App:
         self.town_sub_lines = lines
         self._dialog_return_state = STATE_DUNGEON
         self._set_state(STATE_TOWN_SUB)
+
+    def _interact_fountain(self, nx, ny):
+        _dungeon_map.set_tile(nx, ny, TILE_FLOOR)
+        roll = random.random()
+        if roll < 0.70:
+            restore_hp = max(1, self.player.max_hp * 30 // 100)
+            restore_mp = max(1, self.player.max_mp * 30 // 100) if self.player.max_mp > 0 else 0
+            self.player.hp = min(self.player.max_hp, self.player.hp + restore_hp)
+            self.player.mp = min(self.player.max_mp, self.player.mp + restore_mp)
+            lines = ["Blessed water restores your strength.",
+                     f"+{restore_hp} HP  +{restore_mp} MP"]
+        elif roll < 0.90:
+            lines = ["The fountain is dry..."]
+        else:
+            self.player.status_effects["poison"] = 3
+            lines = ["The water was tainted!", "You are poisoned."]
+        self.sub_win.title = "FOUNTAIN"
+        self.town_sub_lines = lines
+        self._dialog_return_state = STATE_DUNGEON
+        self._set_state(STATE_TOWN_SUB)
+
+    def _interact_merchant(self, nx, ny):
+        self._merchant_pos = (nx, ny)
+        self.merchant_shop_idx = 0
+        self._set_state(STATE_DUNGEON_SHOP)
 
     def _open_chest(self):
         global _dungeon_map
@@ -1009,6 +1049,8 @@ class App:
             self._upd_home()
         elif self.state == STATE_DUNGEON_SKILL:
             self._upd_dungeon_skill()
+        elif self.state == STATE_DUNGEON_SHOP:
+            self._upd_dungeon_shop()
         elif self.state == STATE_ENDING:
             self._upd_ending()
 
@@ -1033,6 +1075,12 @@ class App:
             if _dungeon_map and _dungeon_map.tile_at(nx, ny) == TILE_LOCKED_DOOR:
                 self._interact_locked_door(nx, ny)
                 return
+            elif _dungeon_map and _dungeon_map.tile_at(nx, ny) == TILE_FOUNTAIN:
+                self._interact_fountain(nx, ny)
+                return
+            elif _dungeon_map and _dungeon_map.tile_at(nx, ny) == TILE_MERCHANT:
+                self._interact_merchant(nx, ny)
+                return
             elif not is_wall(nx, ny):
                 self.px, self.py = nx, ny
                 moved = True
@@ -1040,6 +1088,12 @@ class App:
             nx, ny = self.px - dx, self.py - dy
             if _dungeon_map and _dungeon_map.tile_at(nx, ny) == TILE_LOCKED_DOOR:
                 self._interact_locked_door(nx, ny)
+                return
+            elif _dungeon_map and _dungeon_map.tile_at(nx, ny) == TILE_FOUNTAIN:
+                self._interact_fountain(nx, ny)
+                return
+            elif _dungeon_map and _dungeon_map.tile_at(nx, ny) == TILE_MERCHANT:
+                self._interact_merchant(nx, ny)
                 return
             elif not is_wall(nx, ny):
                 self.px, self.py = nx, ny
@@ -1371,6 +1425,29 @@ class App:
                 self.player.mp -= skill.mp_cost
                 self._set_state(STATE_TOWN)
 
+    # ---- Dungeon merchant shop ----
+
+    def _upd_dungeon_shop(self):
+        if pyxel.btnp(pyxel.KEY_X):
+            if self._merchant_pos:
+                _dungeon_map.set_tile(self._merchant_pos[0], self._merchant_pos[1], TILE_FLOOR)
+                self._merchant_pos = None
+            self._set_state(STATE_DUNGEON)
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.merchant_shop_idx = (self.merchant_shop_idx - 1) % len(MERCHANT_KEYS)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.merchant_shop_idx = (self.merchant_shop_idx + 1) % len(MERCHANT_KEYS)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            if len(self.player.inventory) >= INV_MAX:
+                return
+            key = MERCHANT_KEYS[self.merchant_shop_idx]
+            item = ITEM_CATALOG[key]
+            price = int(item.value * 1.5)
+            if self.player.gold >= price:
+                self.player.gold -= price
+                self.player.inventory.append(item.clone())
+
     # ---- Ending ----
 
     def _upd_ending(self):
@@ -1510,6 +1587,8 @@ class App:
             self.draw_status()
             self.draw_minimap()
             self._draw_dungeon_skill()
+        elif self.state == STATE_DUNGEON_SHOP:
+            self._draw_dungeon_shop()
         elif self.state == STATE_ENDING:
             self._draw_ending()
         elif self.state in (STATE_INVENTORY, STATE_INV_ACTION, STATE_INV_GIVE_NPC):
@@ -1795,6 +1874,32 @@ class App:
             pyxel.text(cx, cy + ch - 8, "Z:Use  X:Cancel", COL_DARK_GRAY)
         self.sub_win.draw(_content)
 
+    def _draw_dungeon_shop(self):
+        self.draw_3d_view()
+        self.draw_npcs()
+        self.draw_status()
+        self.draw_minimap()
+        # Merchant panel overlays 3D view area (y=10 to y=170), status bar remains visible
+        px, py, pw, ph = 8, 10, 240, 160
+        pyxel.rect(px, py, pw, ph, COL_BLACK)
+        pyxel.rectb(px, py, pw, ph, COL_WHITE)
+        pyxel.text(px + 4, py + 4, "=WANDERING MERCHANT=", COL_YELLOW)
+        for i, key in enumerate(MERCHANT_KEYS):
+            item = ITEM_CATALOG[key]
+            price = int(item.value * 1.5)
+            col = COL_YELLOW if i == self.merchant_shop_idx else COL_WHITE
+            cursor = ">" if i == self.merchant_shop_idx else " "
+            affordable = self.player.gold >= price
+            name_col = col if affordable else COL_DARK_GRAY
+            pyxel.text(px + 4,       py + 18 + i * 14, f"{cursor} {item.name}", name_col)
+            pyxel.text(px + pw - 40, py + 18 + i * 14, f"{price}G",
+                       COL_YELLOW if affordable else COL_DARK_GRAY)
+        p = self.player
+        pyxel.text(px + 4, py + ph - 18, f"Gold: {p.gold}G", COL_YELLOW)
+        if len(p.inventory) >= INV_MAX:
+            pyxel.text(px + 64, py + ph - 18, "Bag Full!", COL_RED)
+        pyxel.text(px + 4, py + ph - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
+
     def _draw_ending(self):
         pyxel.cls(COL_BLACK)
         p = self.player
@@ -2037,6 +2142,10 @@ class App:
                     col = COL_ORANGE
                 elif tile == TILE_GRAVE:
                     col = COL_PINK
+                elif tile == TILE_FOUNTAIN:
+                    col = COL_BLUE
+                elif tile == TILE_MERCHANT:
+                    col = COL_GREEN
                 elif tile == TILE_LOCKED_DOOR:
                     col = COL_INDIGO
                 else:

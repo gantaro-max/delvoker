@@ -13,6 +13,8 @@ TILE_TRAP_SPIKE  = 4
 TILE_TRAP_POISON = 5
 TILE_GRAVE       = 6
 TILE_LOCKED_DOOR = 7
+TILE_FOUNTAIN    = 8
+TILE_MERCHANT    = 9
 
 
 def _load_json(filename):
@@ -370,7 +372,7 @@ class Map:
     def is_wall(self, x, y):
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
             return True
-        return self.tiles[y][x] in (TILE_WALL, TILE_LOCKED_DOOR)
+        return self.tiles[y][x] in (TILE_WALL, TILE_LOCKED_DOOR, TILE_FOUNTAIN, TILE_MERCHANT)
 
     def tile_at(self, x, y):
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
@@ -481,6 +483,30 @@ class Map:
             if tiles[ky][kx] == TILE_FLOOR:
                 tiles[ky][kx] = TILE_CHEST
                 m.key_chest_pos = (kx, ky)
+
+        # Fountain placement (50% chance, any floor, not in start room)
+        if rooms and random.random() < 0.5:
+            shuffled = list(rooms[1:] if len(rooms) > 1 else rooms)
+            random.shuffle(shuffled)
+            for rx, ry, rw, rh in shuffled:
+                cands = [(fx, fy) for fy in range(ry, ry + rh)
+                         for fx in range(rx, rx + rw) if tiles[fy][fx] == TILE_FLOOR]
+                if cands:
+                    fx, fy = random.choice(cands)
+                    tiles[fy][fx] = TILE_FOUNTAIN
+                    break
+
+        # Merchant placement (B3F+, 20% chance)
+        if current_floor >= 3 and random.random() < 0.2 and len(rooms) >= 3:
+            shuffled = list(rooms[2:])
+            random.shuffle(shuffled)
+            for rx, ry, rw, rh in shuffled:
+                cands = [(fx, fy) for fy in range(ry, ry + rh)
+                         for fx in range(rx, rx + rw) if tiles[fy][fx] == TILE_FLOOR]
+                if cands:
+                    fx, fy = random.choice(cands)
+                    tiles[fy][fx] = TILE_MERCHANT
+                    break
 
         if grave is not None and grave.floor == current_floor:
             if 0 <= grave.x < width and 0 <= grave.y < height:
