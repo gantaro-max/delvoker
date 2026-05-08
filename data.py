@@ -12,6 +12,7 @@ TILE_CHEST       = 3
 TILE_TRAP_SPIKE  = 4
 TILE_TRAP_POISON = 5
 TILE_GRAVE       = 6
+TILE_LOCKED_DOOR = 7
 
 
 def _load_json(filename):
@@ -364,11 +365,12 @@ class Map:
         self.visited = [[False] * width for _ in range(height)]
         self.start_x = 1
         self.start_y = 1
+        self.key_chest_pos = None
 
     def is_wall(self, x, y):
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
             return True
-        return self.tiles[y][x] == TILE_WALL
+        return self.tiles[y][x] in (TILE_WALL, TILE_LOCKED_DOOR)
 
     def tile_at(self, x, y):
         if x < 0 or y < 0 or x >= self.width or y >= self.height:
@@ -448,6 +450,37 @@ class Map:
         if rooms:
             m.start_x = rooms[0][0] + rooms[0][2] // 2
             m.start_y = rooms[0][1] + rooms[0][3] // 2
+
+        # Place locked doors at corridor chokepoints (30% chance per chokepoint, max 2)
+        choke_candidates = []
+        for y in range(1, height - 1):
+            for x in range(1, width - 1):
+                if tiles[y][x] != TILE_FLOOR:
+                    continue
+                # Horizontal corridor: wall above and below
+                h_choke = tiles[y-1][x] == TILE_WALL and tiles[y+1][x] == TILE_WALL
+                # Vertical corridor: wall left and right
+                v_choke = tiles[y][x-1] == TILE_WALL and tiles[y][x+1] == TILE_WALL
+                if h_choke or v_choke:
+                    # Keep away from start room center to avoid blocking early movement
+                    if rooms and abs(x - m.start_x) + abs(y - m.start_y) > 4:
+                        choke_candidates.append((x, y))
+        random.shuffle(choke_candidates)
+        doors_placed = 0
+        for cx, cy in choke_candidates:
+            if doors_placed >= 2:
+                break
+            if random.random() < 0.3:
+                tiles[cy][cx] = TILE_LOCKED_DOOR
+                doors_placed += 1
+
+        # Guarantee a dungeon_key chest in the second room if any doors were placed
+        if doors_placed > 0 and len(rooms) >= 2:
+            kx = rooms[1][0] + rooms[1][2] // 2
+            ky = rooms[1][1] + rooms[1][3] // 2
+            if tiles[ky][kx] == TILE_FLOOR:
+                tiles[ky][kx] = TILE_CHEST
+                m.key_chest_pos = (kx, ky)
 
         if grave is not None and grave.floor == current_floor:
             if 0 <= grave.x < width and 0 <= grave.y < height:

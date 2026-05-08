@@ -6,7 +6,7 @@ from data import (Status, ENEMY_CATALOG, ITEM_CATALOG,
                   NPCMember, Party, ATTR_AFFINITY,
                   Skill, MAX_SKILLS, GrimoireItem,
                   Map, TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
-                  TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, Grave)
+                  TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR, Grave)
 from window import Window
 from npc import NPC
 
@@ -83,7 +83,7 @@ STATE_DUNGEON_SKILL = 17
 
 INV_MAX = 8
 SHOP_KEYS = ["short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
-             "herb", "potion", "ether", "antidote",
+             "herb", "potion", "ether", "antidote", "scroll_mapping",
              "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return"]
 PROMOTION_COST = 1000
 DROP_RATE = 0.35
@@ -451,11 +451,30 @@ class App:
         self.npcs = [NPC(random.choice(npc_pool), px, py)
                      for px, py in positions]
 
+    def _interact_locked_door(self, nx, ny):
+        key_item = next((it for it in self.player.inventory
+                         if it.name == "Dungeon Key"), None)
+        if key_item:
+            self.player.inventory.remove(key_item)
+            _dungeon_map.set_tile(nx, ny, TILE_FLOOR)
+            lines = ["Used Dungeon Key.", "The door opens!"]
+        else:
+            lines = ["It's locked.", "Need a Dungeon Key."]
+        self.sub_win.title = "DOOR"
+        self.town_sub_lines = lines
+        self._dialog_return_state = STATE_DUNGEON
+        self._set_state(STATE_TOWN_SUB)
+
     def _open_chest(self):
         global _dungeon_map
         _dungeon_map.set_tile(self.px, self.py, TILE_FLOOR)
         if len(self.player.inventory) >= INV_MAX:
             lines = ["A chest! Bag is full.", "Item was left behind..."]
+        elif _dungeon_map.key_chest_pos == (self.px, self.py):
+            item = ITEM_CATALOG["dungeon_key"].clone()
+            self.player.inventory.append(item)
+            _dungeon_map.key_chest_pos = None
+            lines = ["Found a chest!", "Got: Dungeon Key!"]
         else:
             wp, ip = _drop_pools(self.dungeon_floor)
             if random.random() < 0.6:
@@ -1011,12 +1030,18 @@ class App:
         moved = False
         if pyxel.btnp(pyxel.KEY_UP):
             nx, ny = self.px + dx, self.py + dy
-            if not is_wall(nx, ny):
+            if _dungeon_map and _dungeon_map.tile_at(nx, ny) == TILE_LOCKED_DOOR:
+                self._interact_locked_door(nx, ny)
+                return
+            elif not is_wall(nx, ny):
                 self.px, self.py = nx, ny
                 moved = True
         if pyxel.btnp(pyxel.KEY_DOWN):
             nx, ny = self.px - dx, self.py - dy
-            if not is_wall(nx, ny):
+            if _dungeon_map and _dungeon_map.tile_at(nx, ny) == TILE_LOCKED_DOOR:
+                self._interact_locked_door(nx, ny)
+                return
+            elif not is_wall(nx, ny):
                 self.px, self.py = nx, ny
                 moved = True
         if pyxel.btnp(pyxel.KEY_LEFT):
@@ -1230,7 +1255,8 @@ class App:
             if sel == "Equip":
                 self._do_equip(item)
             elif sel == "Use":
-                self._do_use(item)
+                if self._do_use(item):
+                    return
             elif sel == "Drop":
                 self.player.inventory.remove(item)
                 self.inv_idx = min(self.inv_idx, max(
@@ -1291,6 +1317,19 @@ class App:
 
     def _do_use(self, item):
         p = self.player
+        if item.name == "Scroll: Mapping":
+            if _dungeon_map:
+                for vy in range(_dungeon_map.height):
+                    for vx in range(_dungeon_map.width):
+                        if _dungeon_map.tiles[vy][vx] != TILE_WALL:
+                            _dungeon_map.visited[vy][vx] = True
+            p.inventory.remove(item)
+            self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
+            self.sub_win.title = "SCROLL"
+            self.town_sub_lines = ["The entire floor map is revealed!"]
+            self._dialog_return_state = self.pre_inv_state
+            self._set_state(STATE_TOWN_SUB)
+            return True
         if isinstance(item, GrimoireItem):
             new_skill = Skill(item.skill_name, item.mp_cost,
                               item.effect_type, item.power,
@@ -1311,6 +1350,7 @@ class App:
                 pyxel.play(2, 2)
         p.inventory.remove(item)
         self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
+        return False
 
     # ---- Dungeon skill use ----
 
@@ -1997,6 +2037,8 @@ class App:
                     col = COL_ORANGE
                 elif tile == TILE_GRAVE:
                     col = COL_PINK
+                elif tile == TILE_LOCKED_DOOR:
+                    col = COL_INDIGO
                 else:
                     col = COL_DARK_GRAY
                 pyxel.pset(ox + tx, oy + ty, col)
