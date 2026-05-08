@@ -5,7 +5,8 @@ from data import (Status, ENEMY_CATALOG, ITEM_CATALOG,
                   make_enchanted_armor, EnchantedArmor,
                   NPCMember, Party, ATTR_AFFINITY,
                   Skill, MAX_SKILLS, GrimoireItem,
-                  Map, TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST)
+                  Map, TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
+                  TILE_TRAP_SPIKE, TILE_TRAP_POISON)
 from window import Window
 from npc import NPC
 
@@ -833,6 +834,23 @@ class App:
                 return
             if tile == TILE_CHEST:
                 self._open_chest()
+                return
+            if tile == TILE_TRAP_SPIKE:
+                dmg = random.randint(5, 10)
+                self.player.hp = max(0, self.player.hp - dmg)
+                _dungeon_map.set_tile(self.px, self.py, TILE_FLOOR)
+                self.sub_win.title = "TRAP"
+                self.town_sub_lines = ["Ouch! A spike trap!", f"You took {dmg} damage!"]
+                self._dialog_return_state = STATE_DUNGEON
+                self._set_state(STATE_TOWN_SUB)
+                return
+            if tile == TILE_TRAP_POISON:
+                self.player.status_effects["poison"] = 3
+                _dungeon_map.set_tile(self.px, self.py, TILE_FLOOR)
+                self.sub_win.title = "TRAP"
+                self.town_sub_lines = ["Poison needles! You are poisoned."]
+                self._dialog_return_state = STATE_DUNGEON
+                self._set_state(STATE_TOWN_SUB)
                 return
             for npc in self.npcs:
                 if npc.at_player(self.px, self.py):

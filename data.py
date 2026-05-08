@@ -5,10 +5,12 @@ from pathlib import Path
 _DATA_DIR = Path(__file__).parent / "data"
 
 # Dungeon tile types
-TILE_FLOOR  = 0
-TILE_WALL   = 1
-TILE_STAIRS = 2
-TILE_CHEST  = 3
+TILE_FLOOR       = 0
+TILE_WALL        = 1
+TILE_STAIRS      = 2
+TILE_CHEST       = 3
+TILE_TRAP_SPIKE  = 4
+TILE_TRAP_POISON = 5
 
 
 def _load_json(filename):
@@ -408,6 +410,23 @@ class Map:
             mid = max(1, len(rooms) // 2)
             cr = rooms[mid]
             tiles[cr[1] + cr[3] // 2][cr[0] + cr[2] // 2] = TILE_CHEST
+
+        if rooms:
+            start_cx = rooms[0][0] + rooms[0][2] // 2
+            start_cy = rooms[0][1] + rooms[0][3] // 2
+            for rx, ry, rw, rh in rooms:
+                count = random.randint(0, 2)
+                candidates = [
+                    (tcx, tcy)
+                    for tcy in range(ry, ry + rh)
+                    for tcx in range(rx, rx + rw)
+                    if tiles[tcy][tcx] == TILE_FLOOR
+                    and not (tcx == start_cx and tcy == start_cy)
+                ]
+                if candidates and count > 0:
+                    chosen = random.sample(candidates, min(count, len(candidates)))
+                    for tcx, tcy in chosen:
+                        tiles[tcy][tcx] = random.choice([TILE_TRAP_SPIKE, TILE_TRAP_POISON])
 
         m = Map(tiles, width, height)
         if rooms:
