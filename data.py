@@ -11,6 +11,7 @@ TILE_STAIRS      = 2
 TILE_CHEST       = 3
 TILE_TRAP_SPIKE  = 4
 TILE_TRAP_POISON = 5
+TILE_GRAVE       = 6
 
 
 def _load_json(filename):
@@ -336,6 +337,16 @@ def make_enchanted_weapon(base_key: str) -> EnchantedWeapon:
     return EnchantedWeapon(base, prefix, suffix)
 
 
+# ---- Grave (lost item recovery) ----
+
+class Grave:
+    def __init__(self, floor, x, y, item):
+        self.floor = floor
+        self.x = x
+        self.y = y
+        self.item = item
+
+
 # ---- Dungeon Map ----
 
 class Map:
@@ -368,7 +379,7 @@ class Map:
             self.tiles[y][x] = tile
 
     @staticmethod
-    def generate_random(width=20, height=20):
+    def generate_random(width=20, height=20, grave=None, current_floor=1):
         tiles = [[TILE_WALL] * width for _ in range(height)]
         rooms = []
 
@@ -432,6 +443,11 @@ class Map:
         if rooms:
             m.start_x = rooms[0][0] + rooms[0][2] // 2
             m.start_y = rooms[0][1] + rooms[0][3] // 2
+
+        if grave is not None and grave.floor == current_floor:
+            if 0 <= grave.x < width and 0 <= grave.y < height:
+                tiles[grave.y][grave.x] = TILE_GRAVE
+
         return m
 
 

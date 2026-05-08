@@ -17,5 +17,8 @@
                   "ai_type": "support", "telegraph_message": "The Orc Chief is charging power!",
                   "parts": [
                     {"name": "Right Arm", "hp_ratio": 0.4, "weakness": "fire", "drop_flag": "chief_gauntlet"}
-                  ]}
+                  ]},
+    "revenant":  {"name": "Revenant", "hp": 40, "def": 2, "exp_reward": 30, "gold_reward": 0,
+                  "weapon": {"name": "Spectral Claw", "dice_count": 1, "dice_sides": 8, "static_bonus": 1},
+                  "weaknesses": ["holy"], "ai_type": "normal"}
 }

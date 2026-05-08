@@ -6,7 +6,7 @@ from data import (Status, ENEMY_CATALOG, ITEM_CATALOG,
                   NPCMember, Party, ATTR_AFFINITY,
                   Skill, MAX_SKILLS, GrimoireItem,
                   Map, TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
-                  TILE_TRAP_SPIKE, TILE_TRAP_POISON)
+                  TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, Grave)
 from window import Window
 from npc import NPC
 
@@ -88,10 +88,17 @@ DROP_RATE = 0.35
 ENCOUNTER_RATE = 0.15
 FLEE_RATE = 0.5
 COMMANDS = ["Fight", "Flee"]
-TOWN_MENU = ["Inn", "Guild", "Shop", "Stats", "Revive", "Enter Dungeon"]
+TOWN_MENU = ["Inn", "Guild", "Shop", "Stats", "Revive", "Home", "Enter Dungeon"]
 
 STAT_ALLOC_NAMES = ["STR", "DEF", "AGI", "MAG"]
 STAT_ALLOC_ATTRS = ["str_", "def_", "agi", "mag"]
+
+STATE_HOME = 15
+HOME_MENU = ["Warehouse", "Renovate", "Training", "Back"]
+HOME_TRAIN_STATS = ["STR", "DEF", "MAG"]
+HOME_TRAIN_ATTRS = ["str", "def", "mag"]
+HOME_RENOVATE_COSTS = [500, 1000, 2000, 4000, 8000]
+HOME_RENOVATE_SLOTS = 5
 
 # Global dungeon map (set by _enter_dungeon_fresh / _next_floor)
 _dungeon_map = None
@@ -110,6 +117,14 @@ class Player(Status):
         super().__init__("warrior", "Hero")
         self.inventory = []
         self.gold = 0
+        self.warehouse = []
+        self.warehouse_max = 10
+        self.perm_stats = {"str": 0, "def": 0, "mag": 0}
+
+    @property
+    def total_def(self):
+        bonus = self.armor.def_bonus if self.armor else 0
+        return self.def_ + bonus + self.perm_stats["def"]
 
 
 class Enemy:
@@ -194,11 +209,22 @@ class App:
         self.give_npc_idx = 0
         self.give_npc_item = None
 
+        # Home state
+        self.home_idx = 0
+        self.home_sub = "menu"
+        self.home_wh_side = 0
+        self.home_wh_idx = 0
+        self.home_train_idx = 0
+
         # NPC command selection (unique NPCs)
         self.npc_cmd_idx = 0
         self._npc_cmd_queue = []
         self._round_msgs = []
         self.current_npc_actor = None
+
+        # Grave recovery state
+        self.grave = None
+        self.is_grave_battle = False
 
         # Visual flash on item loss
         self.flash_timer = 0
@@ -284,6 +310,15 @@ class App:
             self.status_win.close()
             self.shop_win.close()
             self.sub_win.open()
+        elif new_state == STATE_HOME:
+            self.town_win.close()
+            self.status_win.close()
+            self.battle_win.close()
+            self.inv_win.close()
+            self.inv_action_win.close()
+            self.shop_win.close()
+            self.sub_win.title = "HOME"
+            self.sub_win.open()
 
     def wall_at(self, fwd, side):
         dx, dy = DIR_VECTORS[self.dir]
@@ -295,7 +330,7 @@ class App:
 
     def _enter_dungeon_fresh(self):
         global _dungeon_map
-        _dungeon_map = Map.generate_random()
+        _dungeon_map = Map.generate_random(grave=self.grave, current_floor=1)
         self.px = _dungeon_map.start_x
         self.py = _dungeon_map.start_y
         self.dir = 1
@@ -307,7 +342,7 @@ class App:
     def _next_floor(self):
         global _dungeon_map
         self.dungeon_floor += 1
-        _dungeon_map = Map.generate_random()
+        _dungeon_map = Map.generate_random(grave=self.grave, current_floor=self.dungeon_floor)
         self.px = _dungeon_map.start_x
         self.py = _dungeon_map.start_y
         _dungeon_map.visit(self.px, self.py)
@@ -383,6 +418,10 @@ class App:
             elif sel == "Revive":
                 self.revive_idx = 0
                 self._set_state(STATE_REVIVE)
+            elif sel == "Home":
+                self.home_idx = 0
+                self.home_sub = "menu"
+                self._set_state(STATE_HOME)
             elif sel == "Enter Dungeon":
                 self._enter_dungeon_fresh()
 
@@ -592,6 +631,16 @@ class App:
                                 msgs.append(
                                     f"[Part Drop] Bag full! {drop_item.name} lost.")
 
+        if self.is_grave_battle and self.grave:
+            recovered = self.grave.item
+            rec_name = recovered.label() if hasattr(recovered, "label") else recovered.name
+            self.player.inventory.append(recovered)
+            msgs.append(f"Recovered: {rec_name}!")
+            if _dungeon_map:
+                _dungeon_map.set_tile(self.grave.x, self.grave.y, TILE_FLOOR)
+            self.grave = None
+            self.is_grave_battle = False
+
         self.battle_won = True
         self._show_msgs(msgs, STATE_BATTLE_END)
 
@@ -609,6 +658,7 @@ class App:
 
     def _player_attack(self, part_name=None):
         dmg = self._calc_dmg(self.player.weapon, self.enemy.def_, self.enemy)
+        dmg = max(1, dmg + self.player.perm_stats["str"])
         self.enemy.hp = max(0, self.enemy.hp - dmg)
 
         attr = getattr(self.player.weapon, "attribute", None)
@@ -646,16 +696,15 @@ class App:
         if p.armor:
             losable.append(p.armor)
         if not losable:
-            return ""
+            return None
         lost = random.choice(losable)
-        name = lost.label() if hasattr(lost, "label") else lost.name
         if lost in p.inventory:
             p.inventory.remove(lost)
         elif lost is p.weapon:
             p.weapon = ITEM_CATALOG["old_dagger"]
         elif lost is p.armor:
             p.armor = None
-        return name
+        return lost
 
     def _enemy_turn(self, msgs=None):
         if msgs is None:
@@ -703,9 +752,13 @@ class App:
 
         if self.party.is_wiped_out:
             self.battle_won = False
-            self.lost_item_name = self._calc_item_loss()
-            if self.lost_item_name:
+            lost_item = self._calc_item_loss()
+            if lost_item:
+                self.lost_item_name = lost_item.label() if hasattr(lost_item, "label") else lost_item.name
                 msgs.append(f"ITEM LOST: {self.lost_item_name}...")
+                self.grave = Grave(self.dungeon_floor, self.px, self.py, lost_item)
+            else:
+                self.lost_item_name = ""
             self.flash_timer = 20
             self._show_msgs(msgs, STATE_BATTLE_END)
         else:
@@ -798,6 +851,8 @@ class App:
             self._upd_revive()
         elif self.state == STATE_INV_GIVE_NPC:
             self._upd_inv_give_npc()
+        elif self.state == STATE_HOME:
+            self._upd_home()
 
     def _upd_dungeon(self):
         if pyxel.btnp(pyxel.KEY_T):
@@ -851,6 +906,15 @@ class App:
                 self.town_sub_lines = ["Poison needles! You are poisoned."]
                 self._dialog_return_state = STATE_DUNGEON
                 self._set_state(STATE_TOWN_SUB)
+                return
+            if tile == TILE_GRAVE:
+                self.is_grave_battle = True
+                self._start_battle("revenant")
+                self._show_msgs(
+                    ["You found your previous remains.",
+                     "A vengeful spirit appears!"],
+                    STATE_BATTLE_CMD
+                )
                 return
             for npc in self.npcs:
                 if npc.at_player(self.px, self.py):
@@ -1078,6 +1142,100 @@ class App:
         p.inventory.remove(item)
         self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
 
+    # ---- Home logic ----
+
+    def _upd_home(self):
+        sub = self.home_sub
+        p = self.player
+
+        if sub == "menu":
+            if pyxel.btnp(pyxel.KEY_X):
+                self.sub_win.title = None
+                self._set_state(STATE_TOWN)
+                return
+            if pyxel.btnp(pyxel.KEY_UP):
+                self.home_idx = (self.home_idx - 1) % len(HOME_MENU)
+            if pyxel.btnp(pyxel.KEY_DOWN):
+                self.home_idx = (self.home_idx + 1) % len(HOME_MENU)
+            if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                sel = HOME_MENU[self.home_idx]
+                if sel == "Warehouse":
+                    self.home_sub = "warehouse"
+                    self.home_wh_side = 0
+                    self.home_wh_idx = 0
+                    self.sub_win.close()
+                    self.inv_win.title = "HOME: WAREHOUSE"
+                    self.inv_win.open()
+                elif sel == "Renovate":
+                    self.home_sub = "renovate"
+                elif sel == "Training":
+                    self.home_sub = "training"
+                    self.home_train_idx = 0
+                elif sel == "Back":
+                    self.sub_win.title = None
+                    self._set_state(STATE_TOWN)
+
+        elif sub == "warehouse":
+            bag = p.inventory
+            storage = p.warehouse
+            if pyxel.btnp(pyxel.KEY_X):
+                self.home_sub = "menu"
+                self.inv_win.title = "- INVENTORY -"
+                self.inv_win.close()
+                self.sub_win.open()
+                return
+            if pyxel.btnp(pyxel.KEY_LEFT) or pyxel.btnp(pyxel.KEY_RIGHT):
+                self.home_wh_side = 1 - self.home_wh_side
+                self.home_wh_idx = 0
+            current = bag if self.home_wh_side == 0 else storage
+            if current:
+                if pyxel.btnp(pyxel.KEY_UP):
+                    self.home_wh_idx = (self.home_wh_idx - 1) % len(current)
+                if pyxel.btnp(pyxel.KEY_DOWN):
+                    self.home_wh_idx = (self.home_wh_idx + 1) % len(current)
+                if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                    idx = min(self.home_wh_idx, len(current) - 1)
+                    item = current[idx]
+                    if self.home_wh_side == 0 and len(storage) < p.warehouse_max:
+                        bag.remove(item)
+                        storage.append(item)
+                        self.home_wh_idx = min(self.home_wh_idx, max(0, len(bag) - 1))
+                    elif self.home_wh_side == 1 and len(bag) < INV_MAX:
+                        storage.remove(item)
+                        bag.append(item)
+                        self.home_wh_idx = min(self.home_wh_idx, max(0, len(storage) - 1))
+
+        elif sub == "renovate":
+            if pyxel.btnp(pyxel.KEY_X):
+                self.home_sub = "menu"
+                return
+            current_level = (p.warehouse_max - 10) // HOME_RENOVATE_SLOTS
+            if current_level < len(HOME_RENOVATE_COSTS):
+                cost = HOME_RENOVATE_COSTS[current_level]
+                if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                    if p.gold >= cost:
+                        p.gold -= cost
+                        p.warehouse_max += HOME_RENOVATE_SLOTS
+            else:
+                if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                    self.home_sub = "menu"
+
+        elif sub == "training":
+            if pyxel.btnp(pyxel.KEY_X):
+                self.home_sub = "menu"
+                return
+            if pyxel.btnp(pyxel.KEY_UP):
+                self.home_train_idx = (self.home_train_idx - 1) % len(HOME_TRAIN_STATS)
+            if pyxel.btnp(pyxel.KEY_DOWN):
+                self.home_train_idx = (self.home_train_idx + 1) % len(HOME_TRAIN_STATS)
+            if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                attr = HOME_TRAIN_ATTRS[self.home_train_idx]
+                current = p.perm_stats[attr]
+                cost = (current + 1) * 1000
+                if p.gold >= cost:
+                    p.gold -= cost
+                    p.perm_stats[attr] += 1
+
     # ---- Shop logic ----
 
     def _upd_shop(self):
@@ -1111,6 +1269,8 @@ class App:
             self.draw_minimap()
         elif self.state in (STATE_INVENTORY, STATE_INV_ACTION, STATE_INV_GIVE_NPC):
             self._draw_inventory()
+        elif self.state == STATE_HOME:
+            self._draw_home()
         elif self.state == STATE_REVIVE:
             self._draw_revive()
         elif self.state == STATE_SHOP:
@@ -1366,6 +1526,84 @@ class App:
                 pyxel.text(cx, cy + ch - 8, "Z:Give  X:Cancel", COL_DARK_GRAY)
             self.sub_win.draw(_npc_sel_content)
 
+    def _draw_home(self):
+        pyxel.cls(COL_BLACK)
+        sub = self.home_sub
+        p = self.player
+
+        if sub == "menu":
+            def _menu(cx, cy, cw, ch):
+                pyxel.text(cx, cy, "Solace Town - Your Base", COL_WHITE)
+                pyxel.text(cx, cy + 10,
+                           f"Warehouse: {len(p.warehouse)}/{p.warehouse_max}  "
+                           f"STR+{p.perm_stats['str']} DEF+{p.perm_stats['def']} MAG+{p.perm_stats['mag']}",
+                           COL_LIGHT_GRAY)
+                for i, label in enumerate(HOME_MENU):
+                    col = COL_YELLOW if i == self.home_idx else COL_WHITE
+                    cur = ">" if i == self.home_idx else " "
+                    pyxel.text(cx, cy + 26 + i * 14, f"{cur} {label}", col)
+                pyxel.text(cx, cy + ch - 8, "Z:Select  X:Back", COL_DARK_GRAY)
+            self.sub_win.draw(_menu)
+
+        elif sub == "warehouse":
+            def _wh(cx, cy, cw, ch):
+                bag = p.inventory
+                storage = p.warehouse
+                half = cw // 2 - 1
+                bag_col = COL_YELLOW if self.home_wh_side == 0 else COL_LIGHT_GRAY
+                sto_col = COL_YELLOW if self.home_wh_side == 1 else COL_LIGHT_GRAY
+                pyxel.text(cx,          cy, f"BAG ({len(bag)}/{INV_MAX})", bag_col)
+                pyxel.text(cx + half + 3, cy, f"STORAGE ({len(storage)}/{p.warehouse_max})", sto_col)
+                pyxel.line(cx + half + 1, cy + 8, cx + half + 1, cy + ch - 14, COL_DARK_GRAY)
+                max_rows = (ch - 22) // 10
+                for i in range(max_rows):
+                    if i < len(bag):
+                        cur = ">" if (self.home_wh_side == 0 and i == self.home_wh_idx) else " "
+                        col = COL_YELLOW if (self.home_wh_side == 0 and i == self.home_wh_idx) else COL_WHITE
+                        name = bag[i].label() if hasattr(bag[i], "label") else bag[i].name
+                        pyxel.text(cx, cy + 12 + i * 10, f"{cur}{name[:22]}", col)
+                    if i < len(storage):
+                        cur = ">" if (self.home_wh_side == 1 and i == self.home_wh_idx) else " "
+                        col = COL_YELLOW if (self.home_wh_side == 1 and i == self.home_wh_idx) else COL_WHITE
+                        name = storage[i].label() if hasattr(storage[i], "label") else storage[i].name
+                        pyxel.text(cx + half + 3, cy + 12 + i * 10, f"{cur}{name[:22]}", col)
+                pyxel.text(cx, cy + ch - 8, "Z:Transfer  L/R:Side  X:Back", COL_DARK_GRAY)
+            self.inv_win.draw(_wh)
+
+        elif sub == "renovate":
+            def _ren(cx, cy, cw, ch):
+                current_level = (p.warehouse_max - 10) // HOME_RENOVATE_SLOTS
+                pyxel.text(cx, cy, "== RENOVATE ==", COL_YELLOW)
+                pyxel.text(cx, cy + 14, f"Current slots: {p.warehouse_max}", COL_WHITE)
+                if current_level >= len(HOME_RENOVATE_COSTS):
+                    pyxel.text(cx, cy + 28, "Max level reached!", COL_GREEN)
+                    pyxel.text(cx, cy + ch - 8, "Z/X:Back", COL_DARK_GRAY)
+                else:
+                    cost = HOME_RENOVATE_COSTS[current_level]
+                    aff = p.gold >= cost
+                    pyxel.text(cx, cy + 28, f"Next: +{HOME_RENOVATE_SLOTS} slots", COL_WHITE)
+                    pyxel.text(cx, cy + 40, f"Cost: {cost}G",
+                               COL_YELLOW if aff else COL_DARK_GRAY)
+                    pyxel.text(cx, cy + 52, f"Gold: {p.gold}G", COL_YELLOW)
+                    pyxel.text(cx, cy + ch - 8, "Z:Upgrade  X:Back", COL_DARK_GRAY)
+            self.sub_win.draw(_ren)
+
+        elif sub == "training":
+            def _train(cx, cy, cw, ch):
+                pyxel.text(cx, cy, "== TRAINING ==", COL_YELLOW)
+                for i, (sname, attr) in enumerate(zip(HOME_TRAIN_STATS, HOME_TRAIN_ATTRS)):
+                    cur_val = p.perm_stats[attr]
+                    cost = (cur_val + 1) * 1000
+                    aff = p.gold >= cost
+                    cur = ">" if i == self.home_train_idx else " "
+                    col = COL_YELLOW if i == self.home_train_idx else COL_WHITE
+                    pyxel.text(cx,          cy + 14 + i * 16, f"{cur} {sname} +{cur_val}", col)
+                    pyxel.text(cx + cw - 52, cy + 14 + i * 16, f"{cost}G",
+                               col if aff else COL_DARK_GRAY)
+                pyxel.text(cx, cy + ch - 16, f"Gold: {p.gold}G", COL_YELLOW)
+                pyxel.text(cx, cy + ch - 8, "Z:Train  X:Back", COL_DARK_GRAY)
+            self.sub_win.draw(_train)
+
     def _draw_shop(self):
         pyxel.cls(COL_BLACK)
 
@@ -1508,6 +1746,8 @@ class App:
                     col = COL_YELLOW
                 elif tile == TILE_CHEST:
                     col = COL_ORANGE
+                elif tile == TILE_GRAVE:
+                    col = COL_PINK
                 else:
                     col = COL_DARK_GRAY
                 pyxel.pset(ox + tx, oy + ty, col)
