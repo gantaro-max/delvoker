@@ -129,6 +129,16 @@ HOME_TRAIN_ATTRS = ["str", "def", "mag"]
 HOME_RENOVATE_COSTS = [500, 1000, 2000, 4000, 8000]
 HOME_RENOVATE_SLOTS = 5
 
+# BGM zone mapping: state → music index (0=town, 1=dungeon, 2=battle, -1=stop)
+_BGM_ZONES = {
+    STATE_TOWN: 0, STATE_TOWN_SUB: 0, STATE_GUILD: 0,
+    STATE_STAT_ALLOC: 0, STATE_SHOP: 0, STATE_HOME: 0, STATE_REVIVE: 0,
+    STATE_DUNGEON: 1, STATE_DUNGEON_SKILL: 1,
+    STATE_BATTLE_CMD: 2, STATE_BATTLE_MSG: 2, STATE_BATTLE_END: 2,
+    STATE_BATTLE_NPC_CMD: 2, STATE_BATTLE_TARGET_PART: 2,
+    STATE_ENDING: -1,
+}
+
 # Global dungeon map (set by _enter_dungeon_fresh / _next_floor)
 _dungeon_map = None
 
@@ -263,6 +273,15 @@ class App:
         self.flash_timer = 0
         self.lost_item_name = ""
 
+        # Screen shake
+        self.shake_timer = 0
+
+        # BGM zone tracking (-1 = none)
+        self._current_bgm = -1
+
+        # Per-message colors for _show_msgs
+        self.msg_colors = []
+
         # UI Windows
         self.town_win = Window(8,  30, 240, 100, title="- DELVOKER -")
         self.status_win = Window(8, 143, 240,  72)
@@ -273,6 +292,7 @@ class App:
         self.shop_win = Window(8,  10, 240, 230, title="- SHOP -")
 
         self.state = None
+        self._init_audio()
         self._set_state(STATE_TOWN)
 
         pyxel.run(self.update, self.draw)
@@ -282,6 +302,23 @@ class App:
     def add_popup(self, text, x, y, color):
         self.popups.append({"text": text, "x": x, "y": y,
                            "color": color, "timer": 20})
+
+    def _init_audio(self):
+        # SE 0: attack (noise burst)
+        pyxel.sounds[0].set("c3", "n", "7", "f", 5)
+        # SE 1: hit impact (low noise thud)
+        pyxel.sounds[1].set("c1", "n", "6", "f", 8)
+        # SE 2: heal arpeggio (rising triangle)
+        pyxel.sounds[2].set("c2e2g2c3", "t", "5555", "nnnn", 8)
+        # BGM 3: Town (calm square wave melody)
+        pyxel.sounds[3].set("e3g3a3g3e3c3d3e3", "s", "5", "n", 18)
+        # BGM 4: Dungeon (ominous triangle drone)
+        pyxel.sounds[4].set("c2c2a1a1g1g1a1a1", "t", "4", "n", 22)
+        # BGM 5: Battle (upbeat pulse)
+        pyxel.sounds[5].set("c3e3g3b3c4b3g3e3", "p", "6", "n", 12)
+        pyxel.musics[0].set([3], [], [], [])
+        pyxel.musics[1].set([4], [], [], [])
+        pyxel.musics[2].set([5], [], [], [])
 
     # ---- state transitions ----
 
@@ -363,6 +400,14 @@ class App:
             self.inv_win.close()
             self.inv_action_win.close()
             self.shop_win.close()
+
+        new_bgm = _BGM_ZONES.get(new_state, 0)
+        if new_bgm != self._current_bgm:
+            self._current_bgm = new_bgm
+            if new_bgm == -1:
+                pyxel.stop(3)
+            else:
+                pyxel.playm(new_bgm, loop=True)
 
     def wall_at(self, fwd, side):
         dx, dy = DIR_VECTORS[self.dir]
@@ -722,9 +767,11 @@ class App:
             self._enemy_turn(msgs)
 
     def _player_attack(self, part_name=None):
+        pyxel.play(0, 0)
         dmg = self._calc_dmg(self.player.weapon, self.enemy.def_, self.enemy)
         dmg = max(1, dmg + self.player.perm_stats["str"])
         self.enemy.hp = max(0, self.enemy.hp - dmg)
+        pyxel.play(1, 1)
 
         attr = getattr(self.player.weapon, "attribute", None)
         popup_col = COL_YELLOW if (
@@ -787,17 +834,20 @@ class App:
         power_mult = 2 if self.enemy_telegraphing else 1
         self.enemy_telegraphing = False
 
+        pyxel.play(0, 0)
         target = self._get_enemy_target()
         base_dmg = self._calc_dmg(self.enemy.weapon, target.total_def, target)
         dmg = int(base_dmg * power_mult)
         target.hp = max(0, target.hp - dmg)
+        pyxel.play(1, 1)
         if power_mult > 1:
             msgs.append(f"[POWER] {target.name}: -{dmg} HP!")
         else:
             msgs.append(f"{target.name}: -{dmg} HP!")
 
-        # Popup for incoming damage
+        # Popup for incoming damage and screen shake
         self.add_popup(f"-{dmg}", 46, 126, COL_RED)
+        self.shake_timer = 5
 
         # Status infliction
         if edef and edef.inflict_status and random.random() < edef.inflict_chance:
@@ -861,8 +911,23 @@ class App:
         else:
             self._enemy_turn(["Couldn't escape!"])
 
-    def _show_msgs(self, messages, next_state):
+    @staticmethod
+    def _msg_color(msg):
+        if msg.startswith("Got:") or msg.startswith("Recovered:") or "[Part Drop]" in msg:
+            return COL_YELLOW
+        if "LOST" in msg or "Bag full" in msg:
+            return COL_RED
+        if "LEVEL UP" in msg or "HP+" in msg:
+            return COL_GREEN
+        if "[POWER]" in msg or "[Poison]" in msg:
+            return COL_ORANGE
+        if "defeated!" in msg or "conquered" in msg or "opens..." in msg:
+            return COL_PEACH
+        return COL_WHITE
+
+    def _show_msgs(self, messages, next_state, colors=None):
         self.messages = messages
+        self.msg_colors = colors or []
         self.msg_idx = 0
         self.next_state = next_state
         self.state = STATE_BATTLE_MSG
@@ -875,6 +940,8 @@ class App:
 
         if self.flash_timer > 0:
             self.flash_timer -= 1
+        if self.shake_timer > 0:
+            self.shake_timer -= 1
 
         # Tick popups
         self.popups = [p for p in self.popups if p["timer"] > 0]
@@ -1237,9 +1304,11 @@ class App:
             p.mp = min(p.max_mp, p.mp + item.mp_restore)
             if heal_hp > 0:
                 self.add_popup(f"+{heal_hp}", 46, 130, COL_GREEN)
+                pyxel.play(2, 2)
             cure = getattr(item, "cure_status", "")
             if cure and cure in p.status_effects:
                 p.status_effects[cure] = 0
+                pyxel.play(2, 2)
         p.inventory.remove(item)
         self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
 
@@ -1383,6 +1452,8 @@ class App:
     # ---- Draw ----
 
     def draw(self):
+        if self.shake_timer > 0:
+            pyxel.camera(random.randint(-2, 2), random.randint(-2, 2))
         pyxel.cls(COL_NAVY)
         if self.state == STATE_TOWN:
             self._draw_town()
@@ -1417,6 +1488,8 @@ class App:
             self._draw_battle()
         if self.flash_timer > 10:
             pyxel.rect(0, 0, SCREEN_W, SCREEN_H, COL_RED)
+        if self.shake_timer > 0:
+            pyxel.camera()
 
     def _draw_town(self):
         pyxel.cls(COL_BLACK)
@@ -1561,8 +1634,11 @@ class App:
                            "Z:OK  X:Cancel  Up/Down:Select", COL_DARK_GRAY)
             elif self.state == STATE_BATTLE_MSG:
                 if self.msg_idx < len(self.messages):
-                    pyxel.text(
-                        cx, cy + 20, self.messages[self.msg_idx], COL_WHITE)
+                    txt = self.messages[self.msg_idx]
+                    msg_col = (self.msg_colors[self.msg_idx]
+                               if self.msg_idx < len(self.msg_colors)
+                               else self._msg_color(txt))
+                    pyxel.text(cx, cy + 20, txt, msg_col)
                 pyxel.text(SCREEN_W - 58, cy + ch - 8, "Z:Next", COL_DARK_GRAY)
             elif self.state == STATE_BATTLE_END:
                 if self.battle_won:
