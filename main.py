@@ -255,7 +255,7 @@ class App:
         self.sub_win = Window(10, 62, 236, 120)
         self.battle_win = Window(2, 150, SCREEN_W - 4, 88)
         self.inv_win = Window(8,  10, 240, 230, title="- INVENTORY -")
-        self.inv_action_win = Window(78, 96, 120,  56, title="Action")
+        self.inv_action_win = Window(78, 96, 120,  72, title="Action")
         self.shop_win = Window(8,  10, 240, 230, title="- SHOP -")
 
         self.state = None
@@ -644,12 +644,25 @@ class App:
     # ---- Battle logic ----
 
     def _start_battle(self, enemy_key=None):
-        key = enemy_key if enemy_key else random.choice(
-            _encounter_pool(self.dungeon_floor))
-        e = Enemy(ENEMY_CATALOG[key])
-        e.enemy_key = key
-        self.enemies = [e]
-        self._current_enemy_key = key
+        if enemy_key:
+            keys = [enemy_key]
+        else:
+            pool = _encounter_pool(self.dungeon_floor)
+            f = self.dungeon_floor
+            if f <= 2:
+                count = 1
+            elif f <= 5:
+                count = 2 if random.random() < 0.30 else 1
+            else:
+                r = random.random()
+                count = 3 if r < 0.10 else (2 if r < 0.40 else 1)
+            keys = [random.choice(pool) for _ in range(count)]
+        self.enemies = []
+        for k in keys:
+            e = Enemy(ENEMY_CATALOG[k])
+            e.enemy_key = k
+            self.enemies.append(e)
+        self._current_enemy_key = keys[0]
         self.telegraphing = {}
         self.target_idx = 0
         self._attack_target = None
@@ -689,7 +702,7 @@ class App:
             return max(alive, key=lambda m: m.agi)
         if ai_type == "support":
             return min(alive, key=lambda m: m.hp)
-        return alive[0]  # normal: attack first (player)
+        return random.choice(alive)  # normal: random party member
 
     def _npc_combat_action(self, npc, msgs, enemy_target=None):
         etgt = enemy_target or (self.enemies[0] if self.enemies else None)
@@ -1882,10 +1895,12 @@ class App:
                 cx, cy+12,  f"HP: {p.hp}/{p.max_hp}   MP: {p.mp}/{p.max_mp}", COL_GREEN)
             pyxel.text(
                 cx, cy+24,  f"EXP: {p.exp}/{p.exp_to_next}   Gold: {p.gold}", COL_YELLOW)
-            pyxel.text(cx, cy+36,  f"Weapon: {p.weapon.label()}", COL_PEACH)
+            pyxel.text(cx, cy+36, f"Weapon: {p.weapon.label()}", COL_PEACH)
+            armor_name = p.armor.label() if p.armor else "None"
+            pyxel.text(cx, cy+46, f"Armor:  {armor_name}", COL_PEACH)
             if p.bonus_points > 0:
                 pyxel.text(
-                    cx, cy+48, f"Bonus Points: {p.bonus_points}  (Stats menu)", COL_ORANGE)
+                    cx, cy+58, f"Bonus Points: {p.bonus_points}  (Stats menu)", COL_ORANGE)
 
         self.status_win.draw(_status_content)
         pyxel.text(6, 240, "Z/Space:Enter  Up/Down:Select  Q:Quit",
@@ -2526,7 +2541,10 @@ class App:
         floor_str = f"B{self.dungeon_floor}F"
         pyxel.text(SCREEN_W - 4 - len(floor_str) * 4,
                    STATUS_Y + 28, floor_str, COL_YELLOW)
-        pyxel.text(4, STATUS_Y + 40,
+        wp_name = p.weapon.label()[:16] if p.weapon else "None"
+        ar_name = p.armor.label()[:16]  if p.armor  else "None"
+        pyxel.text(4, STATUS_Y + 40, f"W:{wp_name}  A:{ar_name}", COL_PEACH)
+        pyxel.text(4, STATUS_Y + 52,
                    "Arrow:Move  T:Town  I:Item  S:Skill  Q:Quit", COL_DARK_GRAY)
 
 
