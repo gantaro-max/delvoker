@@ -210,6 +210,7 @@ class App:
         # Battle skill selection
         self.skill_idx = 0
         self._pending_skill = None
+        self.steps_since_encounter = 0
 
         # NPC command selection (unique NPCs)
         self.npc_cmd_idx = 0
@@ -253,7 +254,7 @@ class App:
         self.sub_win = Window(10, 62, 236, 120)
         self.battle_win = Window(2, 150, SCREEN_W - 4, 88)
         self.inv_win = Window(8,  10, 240, 230, title="- INVENTORY -")
-        self.inv_action_win = Window(78, 96, 100,  56, title="Action")
+        self.inv_action_win = Window(78, 96, 120,  56, title="Action")
         self.shop_win = Window(8,  10, 240, 230, title="- SHOP -")
 
         self.state = None
@@ -650,6 +651,7 @@ class App:
         self.target_idx = 0
         self._attack_target = None
         self.cmd_idx = 0
+        self.steps_since_encounter = 0
         self.battle_win.close()
         self.battle_win.open()
         self._set_state(STATE_BATTLE_CMD)
@@ -1043,9 +1045,10 @@ class App:
             return
         already = any(s.name == skill_proto.name for s in self.player.skills)
         if not already and len(self.player.skills) < MAX_SKILLS:
+            from data import Skill as _Skill
             self.player.skills.append(
-                Skill(skill_proto.name, skill_proto.mp_cost,
-                      skill_proto.effect_type, skill_proto.power))
+                _Skill(skill_proto.name, skill_proto.mp_cost,
+                       skill_proto.effect_type, skill_proto.power))
 
     def _try_flee(self):
         if self._current_enemy_key in ("dungeon_master", "archdemon"):
@@ -1205,6 +1208,7 @@ class App:
         if moved:
             if _dungeon_map is not None:
                 _dungeon_map.visit(self.px, self.py)
+            self.steps_since_encounter += 1
             tile = _dungeon_map.tile_at(
                 self.px, self.py) if _dungeon_map else 0
             if tile == TILE_STAIRS:
@@ -1264,9 +1268,11 @@ class App:
                     self.npcs.remove(npc)
                     self._start_battle(npc.enemy_key)
                     return
-            if random.random() < ENCOUNTER_RATE:
-                self._start_battle()
-                return
+            if self.steps_since_encounter >= 3:
+                rate = ENCOUNTER_RATE * min(1.0, (self.steps_since_encounter - 2) / 7.0)
+                if random.random() < rate:
+                    self._start_battle()
+                    return
 
         for npc in self.npcs:
             npc.update(self.px, self.py, is_wall)
@@ -2167,8 +2173,8 @@ class App:
             cursor = ">" if i == self.merchant_shop_idx else " "
             affordable = self.player.gold >= price
             name_col = col if affordable else COL_DARK_GRAY
-            pyxel.text(px + 4,       py + 18 + i * 14, f"{cursor} {item.name}", name_col)
-            pyxel.text(px + pw - 40, py + 18 + i * 14, f"{price}G",
+            pyxel.text(px + 4,       py + 18 + i * 14, f"{cursor} {item.name[:18]}", name_col)
+            pyxel.text(px + pw - 46, py + 18 + i * 14, f"{price}G",
                        COL_YELLOW if affordable else COL_DARK_GRAY)
         p = self.player
         pyxel.text(px + 4, py + ph - 18, f"Gold: {p.gold}G", COL_YELLOW)
@@ -2348,8 +2354,8 @@ class App:
                 affordable = self.player.gold >= item.value
                 name_col = col if affordable else COL_DARK_GRAY
                 pyxel.text(cx,           cy + i * 14,
-                           f"{cursor} {item.name}", name_col)
-                pyxel.text(cx + cw - 36, cy + i * 14, f"{item.value}G",
+                           f"{cursor} {item.name[:18]}", name_col)
+                pyxel.text(cx + cw - 42, cy + i * 14, f"{item.value}G",
                            COL_YELLOW if affordable else COL_DARK_GRAY)
             p = self.player
             pyxel.text(cx, cy + ch - 16, f"Gold: {p.gold}G", COL_YELLOW)
@@ -2411,7 +2417,7 @@ class App:
         self.sub_win.draw(_content)
 
     def draw_3d_view(self):
-        _draw_3d_view(self.wall_at, self.assets_loaded, self.dungeon_floor)
+        _draw_3d_view(self.wall_at)
 
     def draw_npcs(self):
         for npc in self.npcs:
