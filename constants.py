@@ -94,11 +94,12 @@ TILE_MERCHANT    = 9
 SAVE_FILE = "delvoker_save.json"
 
 # Inventory / shop
-INV_MAX       = 8
+INV_MAX       = 12
 SHOP_KEYS     = [
     "short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
     "herb", "potion", "ether", "antidote", "scroll_mapping",
     "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return",
+    "lucky_ring", "mana_charm", "rabbits_foot", "emergency_kit",
 ]
 MERCHANT_KEYS  = ["elixir", "potion", "ether", "antidote", "holy_scroll", "grimoire_heal"]
 SHOP_COMMANDS  = ["Buy", "Sell"]

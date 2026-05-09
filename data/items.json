@@ -1,13 +1,13 @@
 {
-    "old_dagger":      {"type": "weapon",     "name": "Old Dagger",      "dice_count": 1, "dice_sides": 6,  "static_bonus": 0, "value": 10},
-    "short_sword":     {"type": "weapon",     "name": "Short Sword",     "dice_count": 1, "dice_sides": 8,  "static_bonus": 1, "value": 50},
-    "long_sword":      {"type": "weapon",     "name": "Long Sword",      "dice_count": 1, "dice_sides": 10, "static_bonus": 2, "value": 150},
-    "staff":           {"type": "weapon",     "name": "Staff",           "dice_count": 1, "dice_sides": 4,  "static_bonus": 0, "value": 20},
-    "steel_sword":     {"type": "weapon",     "name": "Steel Sword",     "dice_count": 2, "dice_sides": 8,  "static_bonus": 3, "value": 300},
-    "mithril_sword":   {"type": "weapon",     "name": "Mithril Sword",   "dice_count": 2, "dice_sides": 10, "static_bonus": 5, "value": 600},
-    "leather_armor":   {"type": "armor",      "name": "Leather Armor",   "def_bonus": 2,  "value": 30},
-    "chain_mail":      {"type": "armor",      "name": "Chain Mail",      "def_bonus": 4,  "value": 100},
-    "steel_plate":     {"type": "armor",      "name": "Steel Plate",     "def_bonus": 6,  "value": 250},
+    "old_dagger":      {"type": "weapon",     "name": "Old Dagger",      "dice_count": 1, "dice_sides": 6,  "static_bonus": 0, "value": 10,  "weight_class": "light"},
+    "short_sword":     {"type": "weapon",     "name": "Short Sword",     "dice_count": 1, "dice_sides": 8,  "static_bonus": 1, "value": 50,  "weight_class": "light"},
+    "long_sword":      {"type": "weapon",     "name": "Long Sword",      "dice_count": 1, "dice_sides": 10, "static_bonus": 2, "value": 150, "weight_class": "heavy"},
+    "staff":           {"type": "weapon",     "name": "Staff",           "dice_count": 1, "dice_sides": 4,  "static_bonus": 0, "value": 20,  "weight_class": "light"},
+    "steel_sword":     {"type": "weapon",     "name": "Steel Sword",     "dice_count": 2, "dice_sides": 8,  "static_bonus": 3, "value": 300, "weight_class": "heavy"},
+    "mithril_sword":   {"type": "weapon",     "name": "Mithril Sword",   "dice_count": 2, "dice_sides": 10, "static_bonus": 5, "value": 600, "weight_class": "heavy"},
+    "leather_armor":   {"type": "armor",      "name": "Leather Armor",   "def_bonus": 2,  "value": 30,  "weight_class": "light"},
+    "chain_mail":      {"type": "armor",      "name": "Chain Mail",      "def_bonus": 4,  "value": 100, "weight_class": "light"},
+    "steel_plate":     {"type": "armor",      "name": "Steel Plate",     "def_bonus": 6,  "value": 250, "weight_class": "heavy"},
     "herb":            {"type": "consumable", "name": "Herb",            "hp_restore": 10, "mp_restore": 0,  "value": 15},
     "potion":          {"type": "consumable", "name": "Potion",          "hp_restore": 30, "mp_restore": 0,  "value": 50},
     "ether":           {"type": "consumable", "name": "Ether",           "hp_restore": 0,  "mp_restore": 15, "value": 60},
@@ -21,5 +21,9 @@
     "dungeon_key":    {"type": "consumable", "name": "Dungeon Key",     "hp_restore": 0,   "mp_restore": 0,   "value": 50},
     "scroll_mapping": {"type": "consumable", "name": "Scroll: Mapping", "hp_restore": 0,   "mp_restore": 0,   "value": 150},
     "elixir":         {"type": "consumable", "name": "Elixir",          "hp_restore": 999, "mp_restore": 999, "value": 500},
-    "holy_scroll":    {"type": "grimoire",   "name": "Holy Scroll",     "skill_name": "Holy Blast", "mp_cost": 7, "effect_type": "attack", "power": 30, "value": 800}
+    "holy_scroll":    {"type": "grimoire",   "name": "Holy Scroll",     "skill_name": "Holy Blast", "mp_cost": 7, "effect_type": "attack", "power": 30, "value": 800},
+    "lucky_ring":     {"type": "accessory", "name": "Lucky Ring",      "luk_bonus": 5,  "mp_bonus": 0,  "value": 200},
+    "mana_charm":     {"type": "accessory", "name": "Mana Charm",      "luk_bonus": 0,  "mp_bonus": 10, "value": 150},
+    "rabbits_foot":   {"type": "accessory", "name": "Rabbit's Foot",   "luk_bonus": 10, "mp_bonus": 0,  "value": 400},
+    "emergency_kit":  {"type": "consumable","name": "Emergency Kit",   "hp_restore": 20, "mp_restore": 0, "value": 25}
 }

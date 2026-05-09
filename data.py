@@ -13,14 +13,15 @@ def _load_json(filename):
 # ---- Jobs ----
 
 class Job:
-    def __init__(self, name, hp_die, mp_die, str_growth, def_growth, agi_growth):
+    def __init__(self, name, hp_die, mp_die, str_growth, def_growth, agi_growth, luk_growth=0.3):
         self.name = name
         self.hp_die = hp_die        # 1 to hp_die HP gained per level
         self.mp_die = mp_die        # 0 = no MP growth
-        # probability of +1 STR per level (0.0-1.0)
+        # probability of +1 per level (0.0-1.0)
         self.str_growth = str_growth
         self.def_growth = def_growth
         self.agi_growth = agi_growth
+        self.luk_growth = luk_growth
 
 
 def _build_jobs(raw):
@@ -39,13 +40,14 @@ class Item:
 class WeaponItem(Item):
     """Wiz風ハイブリッドダメージ: (dice_count × d(dice_sides)) + static_bonus + enchant_bonus"""
 
-    def __init__(self, name, dice_count, dice_sides, static_bonus=0, enchant_bonus=0, value=0, attribute=None):
+    def __init__(self, name, dice_count, dice_sides, static_bonus=0, enchant_bonus=0, value=0, attribute=None, weight_class="light"):
         super().__init__(name, "weapon", value)
         self.dice_count = dice_count
         self.dice_sides = dice_sides
         self.static_bonus = static_bonus
         self.enchant_bonus = enchant_bonus
         self.attribute = attribute
+        self.weight_class = weight_class
 
     def roll_damage(self):
         dice = sum(random.randint(1, self.dice_sides)
@@ -62,7 +64,8 @@ class WeaponItem(Item):
 
     def clone(self):
         return WeaponItem(self.name, self.dice_count, self.dice_sides,
-                          self.static_bonus, self.enchant_bonus, self.value, self.attribute)
+                          self.static_bonus, self.enchant_bonus, self.value,
+                          self.attribute, self.weight_class)
 
 
 class EnchantedWeapon(WeaponItem):
@@ -76,6 +79,7 @@ class EnchantedWeapon(WeaponItem):
             base.static_bonus + (prefix["static_bonus_mod"] if prefix else 0),
             base.enchant_bonus,
             base.value,
+            weight_class=getattr(base, "weight_class", "light"),
         )
         self.prefix = prefix   # dict | None
         self.suffix = suffix   # dict | None
@@ -111,13 +115,14 @@ class EnchantedWeapon(WeaponItem):
 
 
 class ArmorItem(Item):
-    def __init__(self, name, def_bonus, value=0):
+    def __init__(self, name, def_bonus, value=0, weight_class="light"):
         super().__init__(name, "armor", value)
         self.def_bonus = def_bonus
         self.attribute = None
+        self.weight_class = weight_class
 
     def clone(self):
-        return ArmorItem(self.name, self.def_bonus, self.value)
+        return ArmorItem(self.name, self.def_bonus, self.value, self.weight_class)
 
 
 class EnchantedArmor(ArmorItem):
@@ -129,6 +134,7 @@ class EnchantedArmor(ArmorItem):
             base.name,
             max(0, base.def_bonus + bonus_mod),
             base.value,
+            getattr(base, "weight_class", "light"),
         )
         self.prefix = prefix
         self.suffix = suffix
@@ -167,6 +173,25 @@ class ConsumableItem(Item):
         return ConsumableItem(self.name, self.hp_restore, self.mp_restore, self.value, self.cure_status)
 
 
+class AccessoryItem(Item):
+    def __init__(self, name, luk_bonus=0, mp_bonus=0, value=0):
+        super().__init__(name, "accessory", value)
+        self.luk_bonus = luk_bonus
+        self.mp_bonus  = mp_bonus
+
+    def label(self):
+        parts = []
+        if self.luk_bonus:
+            parts.append(f"LUK+{self.luk_bonus}")
+        if self.mp_bonus:
+            parts.append(f"MP+{self.mp_bonus}")
+        suffix = f" ({', '.join(parts)})" if parts else ""
+        return f"{self.name}{suffix}"
+
+    def clone(self):
+        return AccessoryItem(self.name, self.luk_bonus, self.mp_bonus, self.value)
+
+
 class GrimoireItem(ConsumableItem):
     """使用するとスキルを習得できる魔導書。"""
 
@@ -190,9 +215,14 @@ def _build_item(raw):
             raw["name"], raw["dice_count"], raw["dice_sides"],
             raw.get("static_bonus", 0), 0, raw.get("value", 0),
             raw.get("attribute", None),
+            raw.get("weight_class", "light"),
         )
     if t == "armor":
-        return ArmorItem(raw["name"], raw["def_bonus"], raw.get("value", 0))
+        return ArmorItem(raw["name"], raw["def_bonus"], raw.get("value", 0),
+                         raw.get("weight_class", "light"))
+    if t == "accessory":
+        return AccessoryItem(raw["name"], raw.get("luk_bonus", 0),
+                             raw.get("mp_bonus", 0), raw.get("value", 0))
     if t == "consumable":
         return ConsumableItem(
             raw["name"], raw.get("hp_restore", 0), raw.get("mp_restore", 0), raw.get("value", 0),
@@ -377,9 +407,11 @@ class Status:
         self.str_ = 5
         self.def_ = 2
         self.agi = 3
+        self.luk = 3
 
-        self.weapon = ITEM_CATALOG["old_dagger"]
-        self.armor = None
+        self.weapon    = ITEM_CATALOG["old_dagger"]
+        self.armor     = None
+        self.accessory = None
         self.weaknesses   = []
         self._resistances = []
         self.personality  = "normal"  # "normal" | "reckless" | "cowardly" | "selfish"
@@ -402,6 +434,14 @@ class Status:
         self._resistances = value
 
     @property
+    def total_luk(self):
+        return self.luk + (self.accessory.luk_bonus if self.accessory else 0)
+
+    @property
+    def total_max_mp(self):
+        return self.max_mp + (self.accessory.mp_bonus if self.accessory else 0)
+
+    @property
     def exp_to_next(self):
         return 100 * self.level
 
@@ -420,22 +460,24 @@ class Status:
 
     def _do_level_up(self):
         job = self.job
-        hp_gain = random.randint(1, job.hp_die)
-        mp_gain = random.randint(1, job.mp_die) if job.mp_die > 0 else 0
+        hp_gain  = random.randint(1, job.hp_die)
+        mp_gain  = random.randint(1, job.mp_die) if job.mp_die > 0 else 0
         str_gain = 1 if random.random() < job.str_growth else 0
         def_gain = 1 if random.random() < job.def_growth else 0
         agi_gain = 1 if random.random() < job.agi_growth else 0
-        self.level += 1
+        luk_gain = 1 if random.random() < job.luk_growth else 0
+        self.level  += 1
         self.max_hp += hp_gain
         self.max_mp += mp_gain
         self.str_ += str_gain
         self.def_ += def_gain
-        self.agi += agi_gain
+        self.agi  += agi_gain
+        self.luk  += luk_gain
         self.hp = self.max_hp
         self.mp = self.max_mp
         self.bonus_points += 3
         return {"hp": hp_gain, "mp": mp_gain, "str": str_gain,
-                "def": def_gain, "agi": agi_gain}
+                "def": def_gain, "agi": agi_gain, "luk": luk_gain}
 
 
 class NPCMember(Status):
