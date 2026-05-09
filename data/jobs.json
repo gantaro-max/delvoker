@@ -1,4 +1,5 @@
 {
+    "porter":  {"name": "Porter",  "hp_die": 8,  "mp_die": 4, "str_growth": 0.1, "def_growth": 0.1, "agi_growth": 0.8, "luk_growth": 0.7},
     "warrior": {"name": "Warrior", "hp_die": 12, "mp_die": 2, "str_growth": 0.8, "def_growth": 0.6, "agi_growth": 0.3, "luk_growth": 0.3},
     "thief":   {"name": "Thief",   "hp_die": 6,  "mp_die": 0, "str_growth": 0.5, "def_growth": 0.2, "agi_growth": 0.9, "luk_growth": 0.5},
     "mage":    {"name": "Mage",    "hp_die": 4,  "mp_die": 8, "str_growth": 0.2, "def_growth": 0.1, "agi_growth": 0.5, "luk_growth": 0.3},

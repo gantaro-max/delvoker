@@ -324,8 +324,9 @@ class Skill:
 
 
 # Job-specific starting skills granted on character creation or job change.
-# effect_type: "provoke" | "quick_strike" | "mana_bolt" (handled in App._execute_active_skill)
+# effect_type: "encourage" | "provoke" | "quick_strike" | "mana_bolt" (handled in App._execute_active_skill)
 JOB_SKILLS: dict = {
+    "porter":  Skill("Encourage",     mp_cost=4, effect_type="encourage",    power=10),
     "warrior": Skill("Provoke",       mp_cost=3, effect_type="provoke",      power=2),
     "thief":   Skill("Quick Strike",  mp_cost=4, effect_type="quick_strike", power=0),
     "mage":    Skill("Mana Bolt",     mp_cost=5, effect_type="mana_bolt",    power=3),

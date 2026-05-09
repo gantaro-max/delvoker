@@ -230,7 +230,7 @@ class App:
         # Title / job select
         self.title_idx = 0
         self.job_select_idx = 0
-        self.unlocked_jobs = ["warrior"]
+        self.unlocked_jobs = ["porter"]
 
         # Dungeon merchant shop
         self.merchant_shop_idx = 0
@@ -893,8 +893,15 @@ class App:
         self.add_popup(f"-{dmg}", 116, 68, popup_col)
         self.effects.append(Effect(128, 63, "spark"))
 
-        msgs = [f"[CRITICAL!] {enemy.name}: -{dmg} HP!" if is_crit
-                else f"{enemy.name}: -{dmg} HP!"]
+        _aid_verbs = [
+            "distracts", "taunts", "harasses", "baits", "lures",
+            "throws debris at", "feints against", "bluffs at",
+        ]
+        _aid_verb = _aid_verbs[pyxel.frame_count % len(_aid_verbs)]
+        if is_crit:
+            msgs = [f"[CRITICAL!] {self.player.name} {_aid_verb} {enemy.name}! -{dmg} HP!"]
+        else:
+            msgs = [f"{self.player.name} {_aid_verb} {enemy.name}! -{dmg} HP!"]
 
         if part_name and part_name in enemy.part_hps and part_name not in enemy.broken_parts:
             enemy.part_hps[part_name] = max(
@@ -1310,7 +1317,7 @@ class App:
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             npc = self.current_npc_actor
             etgt = self.enemies[0] if self.enemies else None
-            if self.npc_cmd_idx == 0 and etgt:  # Fight
+            if self.npc_cmd_idx == 0 and etgt:  # Aid
                 dmg = self._calc_dmg(npc.weapon, etgt.def_, etgt)
                 etgt.hp = max(0, etgt.hp - dmg)
                 self._round_msgs.append(
@@ -1360,7 +1367,7 @@ class App:
         if pyxel.btnp(pyxel.KEY_DOWN):
             self.cmd_idx = (self.cmd_idx + 1) % len(COMMANDS)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
-            if self.cmd_idx == 0:  # Fight
+            if self.cmd_idx == 0:  # Aid
                 if len(self.enemies) > 1:
                     self.target_idx = 0
                     self.state = STATE_BATTLE_TARGET
@@ -1398,7 +1405,7 @@ class App:
             sk = skills[self.skill_idx]
             if self.player.mp < sk.mp_cost:
                 return  # not enough MP; stay on skill screen
-            if sk.effect_type == "provoke":
+            if sk.effect_type in ("provoke", "encourage"):
                 self._execute_active_skill(sk)
             else:
                 if len(self.enemies) > 1:
@@ -1414,7 +1421,16 @@ class App:
         p = self.player
         p.mp -= skill.mp_cost
         msgs = []
-        if skill.effect_type == "provoke":
+        if skill.effect_type == "encourage":
+            heal = skill.power + p.total_luk // 2
+            names = []
+            for m in self.party.alive:
+                m.hp = min(m.max_hp, m.hp + heal)
+                names.append(m.name)
+            msgs = [f"[Encourage] {p.name} cheers the party! +{heal} HP!",
+                    f"Restored: {', '.join(names)}"]
+            self._run_auto_and_enemy(msgs)
+        elif skill.effect_type == "provoke":
             p.status_effects["provoke"] = skill.power
             msgs = [f"{p.name} uses Provoke! Enemies focus on {p.name}! (-25% dmg)"]
             self._run_auto_and_enemy(msgs)
@@ -1804,7 +1820,7 @@ class App:
                                  for d in data.get("warehouse", [])]
         self.player.warehouse_max = data.get("warehouse_max", 10)
         self.player.perm_stats = data.get("perm_stats", {"str": 0, "def": 0, "mag": 0})
-        self.unlocked_jobs = data.get("unlocked_jobs", ["warrior"])
+        self.unlocked_jobs = data.get("unlocked_jobs", ["porter"])
         self.game_cleared = data.get("game_cleared", False)
         self.bestiary = data.get("bestiary", {})
 

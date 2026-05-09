@@ -109,7 +109,7 @@ PROMOTION_COST = 1000
 DROP_RATE      = 0.35
 ENCOUNTER_RATE = 0.15
 FLEE_RATE      = 0.5
-COMMANDS       = ["Fight", "Skill", "Flee"]
+COMMANDS       = ["Aid", "Skill", "Flee"]
 
 # Menus
 TOWN_MENU           = ["Inn", "Guild", "Shop", "Stats", "Revive", "Home", "Enter Dungeon"]
