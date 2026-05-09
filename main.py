@@ -26,7 +26,7 @@ from constants import (
     _BGM_ZONES,
 )
 from data import (Status, ENEMY_CATALOG, ITEM_CATALOG, JOBS,
-                  WeaponItem, ArmorItem, ConsumableItem,
+                  WeaponItem, ArmorItem, ConsumableItem, AccessoryItem,
                   make_enchanted_weapon, EnchantedWeapon,
                   make_enchanted_armor, EnchantedArmor,
                   NPCMember, Party, ATTR_AFFINITY,
@@ -251,7 +251,7 @@ class App:
 
         # UI Windows
         self.town_win = Window(8,  10, 240, 125, title="- DELVOKER -")
-        self.status_win = Window(8, 143, 240,  72)
+        self.status_win = Window(8, 143, 240,  86)
         self.sub_win = Window(10, 62, 236, 120)
         self.battle_win = Window(2, 150, SCREEN_W - 4, 88)
         self.inv_win = Window(8,  10, 240, 230, title="- INVENTORY -")
@@ -881,16 +881,20 @@ class App:
         pyxel.play(0, 0)
         dmg = self._calc_dmg(self.player.weapon, enemy.def_, enemy)
         dmg = max(1, dmg + self.player.perm_stats["str"])
+        is_crit = random.random() < self.player.total_luk / 100
+        if is_crit:
+            dmg *= 2
         enemy.hp = max(0, enemy.hp - dmg)
         pyxel.play(1, 1)
 
         attr = getattr(self.player.weapon, "attribute", None)
-        popup_col = COL_YELLOW if (
-            attr and attr in enemy.weaknesses) else COL_WHITE
+        popup_col = COL_PINK if is_crit else (
+            COL_YELLOW if (attr and attr in enemy.weaknesses) else COL_WHITE)
         self.add_popup(f"-{dmg}", 116, 68, popup_col)
         self.effects.append(Effect(128, 63, "spark"))
 
-        msgs = [f"{enemy.name}: -{dmg} HP!"]
+        msgs = [f"[CRITICAL!] {enemy.name}: -{dmg} HP!" if is_crit
+                else f"{enemy.name}: -{dmg} HP!"]
 
         if part_name and part_name in enemy.part_hps and part_name not in enemy.broken_parts:
             enemy.part_hps[part_name] = max(
@@ -1070,7 +1074,8 @@ class App:
         if self._current_enemy_key in ("dungeon_master", "archdemon"):
             self._enemy_turn(["You cannot escape!"])
             return
-        if random.random() < FLEE_RATE:
+        flee_rate = min(0.95, FLEE_RATE + self.player.total_luk * 0.01)
+        if random.random() < flee_rate:
             self._show_msgs(["Got away safely!"], STATE_DUNGEON)
         else:
             self._enemy_turn(["Couldn't escape!"])
@@ -1482,8 +1487,8 @@ class App:
                            if isinstance(m, NPCMember)]
             if usable:
                 self.inv_actions = ["Use", "Drop", "Cancel"]
-            elif item.kind in ("weapon", "armor") and npc_members:
-                self.inv_actions = ["Equip", "Give to NPC", "Drop", "Cancel"]
+            elif item.kind in ("weapon", "armor", "accessory") and npc_members:
+                self.inv_actions = ["Equip", "Manage NPC Gear", "Drop", "Cancel"]
             else:
                 self.inv_actions = ["Equip", "Drop", "Cancel"]
             self.inv_action_idx = 0
@@ -1511,7 +1516,7 @@ class App:
                 self.player.inventory.remove(item)
                 self.inv_idx = min(self.inv_idx, max(
                     0, len(self.player.inventory) - 1))
-            elif sel == "Give to NPC":
+            elif sel == "Manage NPC Gear":
                 self.give_npc_item = item
                 self.give_npc_idx = 0
                 self._set_state(STATE_INV_GIVE_NPC)
@@ -1520,6 +1525,13 @@ class App:
 
     def _do_equip(self, item):
         p = self.player
+        wc = getattr(item, "weight_class", "light")
+        if wc == "heavy":
+            self.town_sub_lines = ["Too heavy for a Porter!", "Cannot equip heavy gear."]
+            self.sub_win.title = "EQUIP"
+            self._dialog_return_state = STATE_INV_ACTION
+            self._set_state(STATE_TOWN_SUB)
+            return
         if item.kind == "weapon":
             if p.weapon:
                 p.inventory.append(p.weapon)
@@ -1528,6 +1540,10 @@ class App:
             if p.armor:
                 p.inventory.append(p.armor)
             p.armor = item
+        elif item.kind == "accessory":
+            if p.accessory:
+                p.inventory.append(p.accessory)
+            p.accessory = item
         p.inventory.remove(item)
         self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
 
@@ -1559,6 +1575,12 @@ class App:
                 old_item = npc.armor
                 p.inventory.remove(item)
                 npc.armor = item
+                if old_item:
+                    p.inventory.append(old_item)
+            elif item.kind == "accessory":
+                old_item = getattr(npc, "accessory", None)
+                p.inventory.remove(item)
+                npc.accessory = item
                 if old_item:
                     p.inventory.append(old_item)
             self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
@@ -1890,17 +1912,19 @@ class App:
         def _status_content(cx, cy, cw, ch):
             p = self.player
             pyxel.text(
-                cx, cy,     f"{p.name}  Lv{p.level} {p.job.name}", COL_WHITE)
+                cx, cy,     f"{p.name}  Lv{p.level} {p.job.name}  LUK:{p.total_luk}", COL_WHITE)
             pyxel.text(
-                cx, cy+12,  f"HP: {p.hp}/{p.max_hp}   MP: {p.mp}/{p.max_mp}", COL_GREEN)
+                cx, cy+12,  f"HP: {p.hp}/{p.max_hp}   MP: {p.mp}/{p.total_max_mp}", COL_GREEN)
             pyxel.text(
                 cx, cy+24,  f"EXP: {p.exp}/{p.exp_to_next}   Gold: {p.gold}", COL_YELLOW)
-            pyxel.text(cx, cy+36, f"Weapon: {p.weapon.label()}", COL_PEACH)
+            pyxel.text(cx, cy+36, f"W: {p.weapon.label()}", COL_PEACH)
             armor_name = p.armor.label() if p.armor else "None"
-            pyxel.text(cx, cy+46, f"Armor:  {armor_name}", COL_PEACH)
+            pyxel.text(cx, cy+46, f"A: {armor_name}", COL_PEACH)
+            acc_name = p.accessory.label() if p.accessory else "None"
+            pyxel.text(cx, cy+56, f"Acc: {acc_name}", COL_PEACH)
             if p.bonus_points > 0:
                 pyxel.text(
-                    cx, cy+58, f"Bonus Points: {p.bonus_points}  (Stats menu)", COL_ORANGE)
+                    cx, cy+66, f"Bonus Points: {p.bonus_points}  (Stats menu)", COL_ORANGE)
 
         self.status_win.draw(_status_content)
         pyxel.text(6, 240, "Z/Space:Enter  Up/Down:Select  Q:Quit",
@@ -2092,6 +2116,8 @@ class App:
                             parts.append("DEF+1")
                         if lu["agi"] > 0:
                             parts.append("AGI+1")
+                        if lu.get("luk", 0) > 0:
+                            parts.append("LUK+1")
                         pyxel.text(cx, cy + 34, "  ".join(parts), COL_PEACH)
                 else:
                     pyxel.text(cx + (cw - 44) // 2, cy +
@@ -2163,18 +2189,29 @@ class App:
 
         if self.state == STATE_INV_GIVE_NPC:
             def _npc_sel_content(cx, cy, _cw, ch):
-                pyxel.text(cx, cy, "== Give to NPC ==", COL_YELLOW)
+                item = self.give_npc_item
+                item_label = f"[{item.kind.upper()}] {item.name[:18]}" if item else ""
+                pyxel.text(cx, cy, "== Manage NPC Gear ==", COL_YELLOW)
+                pyxel.text(cx, cy + 10, item_label, COL_PEACH)
                 npc_members = [m for m in self.party.members[1:]
                                if isinstance(m, NPCMember)]
                 if not npc_members:
-                    pyxel.text(cx, cy + 16, "No NPC in party.", COL_DARK_GRAY)
+                    pyxel.text(cx, cy + 24, "No NPC in party.", COL_DARK_GRAY)
                 else:
                     for i, npc in enumerate(npc_members):
                         cursor = ">" if i == self.give_npc_idx else " "
                         col = COL_YELLOW if i == self.give_npc_idx else COL_WHITE
-                        pyxel.text(cx, cy + 16 + i * 14,
+                        pyxel.text(cx, cy + 24 + i * 28,
                                    f"{cursor} {npc.name}", col)
-                pyxel.text(cx, cy + ch - 8, "Z:Give  X:Cancel", COL_DARK_GRAY)
+                        npc_wp  = npc.weapon.name[:14]    if npc.weapon    else "None"
+                        npc_ar  = npc.armor.name[:14]     if npc.armor     else "None"
+                        npc_acc = getattr(npc, "accessory", None)
+                        npc_acc = npc_acc.name[:12] if npc_acc else "None"
+                        pyxel.text(cx + 8, cy + 24 + i * 28 + 9,
+                                   f"W:{npc_wp}  A:{npc_ar}", COL_LIGHT_GRAY)
+                        pyxel.text(cx + 8, cy + 24 + i * 28 + 18,
+                                   f"Acc:{npc_acc}", COL_LIGHT_GRAY)
+                pyxel.text(cx, cy + ch - 8, "Z:Equip  X:Cancel", COL_DARK_GRAY)
             self.sub_win.draw(_npc_sel_content)
 
     def _draw_dungeon_skill(self):
@@ -2541,10 +2578,12 @@ class App:
         floor_str = f"B{self.dungeon_floor}F"
         pyxel.text(SCREEN_W - 4 - len(floor_str) * 4,
                    STATUS_Y + 28, floor_str, COL_YELLOW)
-        wp_name = p.weapon.label()[:16] if p.weapon else "None"
-        ar_name = p.armor.label()[:16]  if p.armor  else "None"
+        wp_name  = p.weapon.label()[:16]    if p.weapon    else "None"
+        ar_name  = p.armor.label()[:16]     if p.armor     else "None"
+        acc_name = p.accessory.label()[:12] if p.accessory else "None"
         pyxel.text(4, STATUS_Y + 40, f"W:{wp_name}  A:{ar_name}", COL_PEACH)
-        pyxel.text(4, STATUS_Y + 52,
+        pyxel.text(4, STATUS_Y + 52, f"Acc:{acc_name}", COL_PEACH)
+        pyxel.text(4, STATUS_Y + 64,
                    "Arrow:Move  T:Town  I:Item  S:Skill  Q:Quit", COL_DARK_GRAY)
 
 

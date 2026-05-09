@@ -1,7 +1,7 @@
 import json
 from data import (
     WeaponItem, EnchantedWeapon, ArmorItem, EnchantedArmor,
-    GrimoireItem, ConsumableItem,
+    GrimoireItem, ConsumableItem, AccessoryItem,
 )
 from constants import SAVE_FILE
 
@@ -36,6 +36,10 @@ def serialize_item(item):
                 "name": item.name, "skill_name": item.skill_name,
                 "mp_cost": item.mp_cost, "effect_type": item.effect_type,
                 "power": item.power, "value": item.value, "is_utility": item.is_utility}
+    if isinstance(item, AccessoryItem):
+        return {"kind": "accessory",
+                "name": item.name, "luk_bonus": item.luk_bonus,
+                "mp_bonus": item.mp_bonus, "value": item.value}
     return {"kind": "consumable",
             "name": item.name, "hp_restore": getattr(item, "hp_restore", 0),
             "mp_restore": getattr(item, "mp_restore", 0), "value": item.value,
@@ -61,6 +65,9 @@ def deserialize_item(d):
         return GrimoireItem(d["name"], d["skill_name"], d.get("mp_cost", 5),
                             d.get("effect_type", "attack"), d.get("power", 10),
                             d.get("value", 0), d.get("is_utility", False))
+    if k == "accessory":
+        return AccessoryItem(d["name"], d.get("luk_bonus", 0),
+                             d.get("mp_bonus", 0), d.get("value", 0))
     return ConsumableItem(d["name"], d.get("hp_restore", 0), d.get("mp_restore", 0),
                           d.get("value", 0), d.get("cure_status", ""))
 
