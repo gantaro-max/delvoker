@@ -204,6 +204,8 @@ class App:
         self.home_wh_side = 0
         self.home_wh_idx = 0
         self.home_train_idx = 0
+        self.bestiary: dict[str, int] = {}
+        self.bestiary_idx = 0
 
         # NPC command selection (unique NPCs)
         self.npc_cmd_idx = 0
@@ -740,6 +742,9 @@ class App:
     def _handle_victory(self, msgs, enemy=None):
         if enemy and enemy in self.enemies:
             self.enemies.remove(enemy)
+        ekey = getattr(enemy, "enemy_key", None)
+        if ekey:
+            self.bestiary[ekey] = self.bestiary.get(ekey, 0) + 1
         exp = enemy.exp_reward if enemy else 0
         gold = enemy.gold_reward if enemy else 0
         self.player.gold += gold
@@ -1554,6 +1559,12 @@ class App:
                 elif sel == "Training":
                     self.home_sub = "training"
                     self.home_train_idx = 0
+                elif sel == "Bestiary":
+                    self.home_sub = "bestiary"
+                    self.bestiary_idx = 0
+                    self.sub_win.close()
+                    self.inv_win.title = "== BESTIARY =="
+                    self.inv_win.open()
                 elif sel == "Back":
                     self.sub_win.title = None
                     self._set_state(STATE_TOWN)
@@ -1620,10 +1631,25 @@ class App:
                     p.perm_stats[attr] += 1
                     self.save_data()
 
+        elif sub == "bestiary":
+            if pyxel.btnp(pyxel.KEY_X):
+                self.home_sub = "menu"
+                self.inv_win.title = "- INVENTORY -"
+                self.inv_win.close()
+                self.sub_win.open()
+                return
+            discovered = [k for k in ENEMY_CATALOG if self.bestiary.get(k, 0) > 0]
+            if discovered:
+                if pyxel.btnp(pyxel.KEY_UP):
+                    self.bestiary_idx = (self.bestiary_idx - 1) % len(discovered)
+                if pyxel.btnp(pyxel.KEY_DOWN):
+                    self.bestiary_idx = (self.bestiary_idx + 1) % len(discovered)
+                self.bestiary_idx = min(self.bestiary_idx, len(discovered) - 1)
+
     # ---- Persistence ----
 
     def save_data(self):
-        save_game(self.player, self.unlocked_jobs, self.game_cleared)
+        save_game(self.player, self.unlocked_jobs, self.game_cleared, bestiary=self.bestiary)
 
     def load_data(self):
         data = load_game()
@@ -1636,6 +1662,7 @@ class App:
         self.player.perm_stats = data.get("perm_stats", {"str": 0, "def": 0, "mag": 0})
         self.unlocked_jobs = data.get("unlocked_jobs", ["warrior"])
         self.game_cleared = data.get("game_cleared", False)
+        self.bestiary = data.get("bestiary", {})
 
     # ---- Shop logic ----
 
@@ -2163,6 +2190,39 @@ class App:
                 pyxel.text(cx, cy + ch - 16, f"Gold: {p.gold}G", COL_YELLOW)
                 pyxel.text(cx, cy + ch - 8, "Z:Train  X:Back", COL_DARK_GRAY)
             self.sub_win.draw(_train)
+
+        elif sub == "bestiary":
+            def _bst(cx, cy, cw, ch):
+                discovered = [k for k in ENEMY_CATALOG if self.bestiary.get(k, 0) > 0]
+                total = len(ENEMY_CATALOG)
+                pyxel.text(cx, cy, f"Discovered: {len(discovered)}/{total}", COL_LIGHT_GRAY)
+                if not discovered:
+                    pyxel.text(cx, cy + 16, "No enemies recorded yet.", COL_DARK_GRAY)
+                else:
+                    max_rows = (ch - 56) // 10
+                    scroll = max(0, self.bestiary_idx - max_rows + 1)
+                    for row, i in enumerate(range(scroll, min(scroll + max_rows, len(discovered)))):
+                        key = discovered[i]
+                        edef = ENEMY_CATALOG[key]
+                        cur = ">" if i == self.bestiary_idx else " "
+                        col = COL_YELLOW if i == self.bestiary_idx else COL_WHITE
+                        kills = self.bestiary.get(key, 0)
+                        pyxel.text(cx, cy + 12 + row * 10, f"{cur}{edef.name[:16]}", col)
+                        pyxel.text(cx + cw - 38, cy + 12 + row * 10, f"x{kills}", col)
+                    # Detail panel for selected enemy
+                    if self.bestiary_idx < len(discovered):
+                        sel_key = discovered[self.bestiary_idx]
+                        edef = ENEMY_CATALOG[sel_key]
+                        dy = cy + ch - 46
+                        pyxel.line(cx, dy - 2, cx + cw - 1, dy - 2, COL_DARK_GRAY)
+                        pyxel.text(cx, dy, f"-- {edef.name} --", COL_YELLOW)
+                        pyxel.text(cx, dy + 10, f"HP:{edef.hp}  DEF:{edef.def_}", COL_WHITE)
+                        weak_str = "/".join(edef.weaknesses) if edef.weaknesses else "none"
+                        res_str = "/".join(edef.resistances) if edef.resistances else "none"
+                        pyxel.text(cx, dy + 20, f"Weak:{weak_str}", COL_ORANGE)
+                        pyxel.text(cx, dy + 30, f"Res:{res_str}", COL_BLUE)
+                pyxel.text(cx, cy + ch - 8, "U/D:Scroll  X:Back", COL_DARK_GRAY)
+            self.inv_win.draw(_bst)
 
     def _draw_shop(self):
         pyxel.cls(COL_BLACK)

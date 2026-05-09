@@ -65,7 +65,7 @@ def deserialize_item(d):
                           d.get("value", 0), d.get("cure_status", ""))
 
 
-def save_game(player, unlocked_jobs, game_cleared, filepath=SAVE_FILE):
+def save_game(player, unlocked_jobs, game_cleared, bestiary=None, filepath=SAVE_FILE):
     data = {
         "gold": player.gold,
         "warehouse": [serialize_item(it) for it in player.warehouse],
@@ -73,6 +73,7 @@ def save_game(player, unlocked_jobs, game_cleared, filepath=SAVE_FILE):
         "perm_stats": dict(player.perm_stats),
         "unlocked_jobs": list(unlocked_jobs),
         "game_cleared": game_cleared,
+        "bestiary": bestiary or {},
     }
     with open(filepath, "w", encoding="ascii") as f:
         json.dump(data, f, ensure_ascii=True)
