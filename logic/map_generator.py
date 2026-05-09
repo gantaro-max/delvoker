@@ -83,8 +83,14 @@ class Map:
         if rooms:
             start_cx = rooms[0][0] + rooms[0][2] // 2
             start_cy = rooms[0][1] + rooms[0][3] // 2
+            if current_floor < 3:
+                max_traps = 0
+            elif current_floor < 6:
+                max_traps = 1
+            else:
+                max_traps = 2
             for rx, ry, rw, rh in rooms:
-                count = random.randint(0, 2)
+                count = random.randint(0, max_traps)
                 candidates = [
                     (tcx, tcy)
                     for tcy in range(ry, ry + rh)
@@ -102,6 +108,9 @@ class Map:
             m.start_x = rooms[0][0] + rooms[0][2] // 2
             m.start_y = rooms[0][1] + rooms[0][3] // 2
 
+        if current_floor < 3:
+            return m
+
         # Place locked doors at corridor chokepoints (30% chance per chokepoint, max 2)
         choke_candidates = []
         for y in range(1, height - 1):
@@ -115,20 +124,23 @@ class Map:
                         choke_candidates.append((x, y))
         random.shuffle(choke_candidates)
         doors_placed = 0
+        max_doors = 1 if current_floor < 6 else 2
         for cx, cy in choke_candidates:
-            if doors_placed >= 2:
+            if doors_placed >= max_doors:
                 break
             if random.random() < 0.3:
                 tiles[cy][cx] = TILE_LOCKED_DOOR
                 doors_placed += 1
 
-        # Guarantee a dungeon_key chest in the second room if any doors were placed
+        # Guarantee a dungeon_key chest in an accessible room if any doors were placed
         if doors_placed > 0 and len(rooms) >= 2:
-            kx = rooms[1][0] + rooms[1][2] // 2
-            ky = rooms[1][1] + rooms[1][3] // 2
-            if tiles[ky][kx] == TILE_FLOOR:
-                tiles[ky][kx] = TILE_CHEST
-                m.key_chest_pos = (kx, ky)
+            for r in rooms[1:]:
+                kx = r[0] + r[2] // 2
+                ky = r[1] + r[3] // 2
+                if tiles[ky][kx] not in (TILE_WALL, TILE_LOCKED_DOOR):
+                    tiles[ky][kx] = TILE_CHEST
+                    m.key_chest_pos = (kx, ky)
+                    break
 
         # Fountain placement (50% chance, any floor, not in start room)
         if rooms and random.random() < 0.5:

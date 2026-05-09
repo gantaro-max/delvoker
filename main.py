@@ -18,7 +18,7 @@ from constants import (
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
     TILE_FOUNTAIN, TILE_MERCHANT,
-    SAVE_FILE, INV_MAX, SHOP_KEYS, MERCHANT_KEYS,
+    SAVE_FILE, INV_MAX, SHOP_KEYS, MERCHANT_KEYS, SHOP_COMMANDS,
     PROMOTION_COST, DROP_RATE, ENCOUNTER_RATE, FLEE_RATE, COMMANDS,
     TOWN_MENU, STAT_ALLOC_NAMES, STAT_ALLOC_ATTRS,
     HOME_MENU, HOME_TRAIN_STATS, HOME_TRAIN_ATTRS,
@@ -176,7 +176,8 @@ class App:
         self.pre_inv_state = STATE_TOWN
 
         # Shop state
-        self.shop_idx = 0
+        self.shop_idx  = 0
+        self.shop_mode = "buy"
 
         # Guild state
         self.guild_idx = 0
@@ -210,6 +211,7 @@ class App:
         # Battle skill selection
         self.skill_idx = 0
         self._pending_skill = None
+        self.steps_since_encounter = 0
 
         # NPC command selection (unique NPCs)
         self.npc_cmd_idx = 0
@@ -253,7 +255,7 @@ class App:
         self.sub_win = Window(10, 62, 236, 120)
         self.battle_win = Window(2, 150, SCREEN_W - 4, 88)
         self.inv_win = Window(8,  10, 240, 230, title="- INVENTORY -")
-        self.inv_action_win = Window(78, 96, 100,  56, title="Action")
+        self.inv_action_win = Window(78, 96, 120,  56, title="Action")
         self.shop_win = Window(8,  10, 240, 230, title="- SHOP -")
 
         self.state = None
@@ -281,9 +283,9 @@ class App:
         pyxel.sounds[4].set("c2c2a1a1g1g1a1a1", "t", "2", "n", 22)
         # BGM 5: Battle (triangle upbeat)
         pyxel.sounds[5].set("c3e3g3b3c4b3g3e3", "t", "3", "n", 12)
-        pyxel.musics[0].set([3], [], [], [])
-        pyxel.musics[1].set([4], [], [], [])
-        pyxel.musics[2].set([5], [], [], [])
+        # pyxel.musics[0].set([3], [], [], [])  # Issue #03: BGM disabled pending replacement
+        # pyxel.musics[1].set([4], [], [], [])
+        # pyxel.musics[2].set([5], [], [], [])
 
     # ---- state transitions ----
 
@@ -341,6 +343,8 @@ class App:
             self.town_win.close()
             self.status_win.close()
             self.shop_win.open()
+            self.shop_mode = "buy"
+            self.shop_idx  = 0
         elif new_state == STATE_GUILD:
             self.sub_win.close()
             self.town_win.close()
@@ -650,6 +654,7 @@ class App:
         self.target_idx = 0
         self._attack_target = None
         self.cmd_idx = 0
+        self.steps_since_encounter = 0
         self.battle_win.close()
         self.battle_win.open()
         self._set_state(STATE_BATTLE_CMD)
@@ -1043,9 +1048,10 @@ class App:
             return
         already = any(s.name == skill_proto.name for s in self.player.skills)
         if not already and len(self.player.skills) < MAX_SKILLS:
+            from data import Skill as _Skill
             self.player.skills.append(
-                Skill(skill_proto.name, skill_proto.mp_cost,
-                      skill_proto.effect_type, skill_proto.power))
+                _Skill(skill_proto.name, skill_proto.mp_cost,
+                       skill_proto.effect_type, skill_proto.power))
 
     def _try_flee(self):
         if self._current_enemy_key in ("dungeon_master", "archdemon"):
@@ -1205,6 +1211,7 @@ class App:
         if moved:
             if _dungeon_map is not None:
                 _dungeon_map.visit(self.px, self.py)
+            self.steps_since_encounter += 1
             tile = _dungeon_map.tile_at(
                 self.px, self.py) if _dungeon_map else 0
             if tile == TILE_STAIRS:
@@ -1264,9 +1271,11 @@ class App:
                     self.npcs.remove(npc)
                     self._start_battle(npc.enemy_key)
                     return
-            if random.random() < ENCOUNTER_RATE:
-                self._start_battle()
-                return
+            if self.steps_since_encounter >= 4:
+                rate = ENCOUNTER_RATE * min(1.0, (self.steps_since_encounter - 3) / 7.0)
+                if random.random() < rate:
+                    self._start_battle()
+                    return
 
         for npc in self.npcs:
             npc.update(self.px, self.py, is_wall)
@@ -1770,17 +1779,39 @@ class App:
         if pyxel.btnp(pyxel.KEY_X):
             self._set_state(STATE_TOWN)
             return
-        if pyxel.btnp(pyxel.KEY_UP):
-            self.shop_idx = (self.shop_idx - 1) % len(SHOP_KEYS)
-        if pyxel.btnp(pyxel.KEY_DOWN):
-            self.shop_idx = (self.shop_idx + 1) % len(SHOP_KEYS)
-        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
-            if len(self.player.inventory) >= INV_MAX:
+        if pyxel.btnp(pyxel.KEY_LEFT) or pyxel.btnp(pyxel.KEY_RIGHT):
+            self.shop_mode = "sell" if self.shop_mode == "buy" else "buy"
+            self.shop_idx = 0
+            return
+        if self.shop_mode == "buy":
+            if pyxel.btnp(pyxel.KEY_UP):
+                self.shop_idx = (self.shop_idx - 1) % len(SHOP_KEYS)
+            if pyxel.btnp(pyxel.KEY_DOWN):
+                self.shop_idx = (self.shop_idx + 1) % len(SHOP_KEYS)
+            if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                if len(self.player.inventory) >= INV_MAX:
+                    return
+                item = ITEM_CATALOG[SHOP_KEYS[self.shop_idx]]
+                if self.player.gold >= item.value:
+                    self.player.gold -= item.value
+                    self.player.inventory.append(item.clone())
+        else:
+            inv = self.player.inventory
+            if not inv:
                 return
-            item = ITEM_CATALOG[SHOP_KEYS[self.shop_idx]]
-            if self.player.gold >= item.value:
-                self.player.gold -= item.value
-                self.player.inventory.append(item.clone())
+            self.shop_idx = min(self.shop_idx, len(inv) - 1)
+            if pyxel.btnp(pyxel.KEY_UP):
+                self.shop_idx = (self.shop_idx - 1) % len(inv)
+            if pyxel.btnp(pyxel.KEY_DOWN):
+                self.shop_idx = (self.shop_idx + 1) % len(inv)
+            if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                item = inv[self.shop_idx]
+                if item is self.player.weapon or item is self.player.armor:
+                    return
+                sell_price = int(item.value * 0.3)
+                self.player.gold += sell_price
+                inv.pop(self.shop_idx)
+                self.shop_idx = min(self.shop_idx, max(0, len(inv) - 1))
 
     # ---- Draw ----
 
@@ -2167,8 +2198,8 @@ class App:
             cursor = ">" if i == self.merchant_shop_idx else " "
             affordable = self.player.gold >= price
             name_col = col if affordable else COL_DARK_GRAY
-            pyxel.text(px + 4,       py + 18 + i * 14, f"{cursor} {item.name}", name_col)
-            pyxel.text(px + pw - 40, py + 18 + i * 14, f"{price}G",
+            pyxel.text(px + 4,       py + 18 + i * 14, f"{cursor} {item.name[:18]}", name_col)
+            pyxel.text(px + pw - 46, py + 18 + i * 14, f"{price}G",
                        COL_YELLOW if affordable else COL_DARK_GRAY)
         p = self.player
         pyxel.text(px + 4, py + ph - 18, f"Gold: {p.gold}G", COL_YELLOW)
@@ -2341,21 +2372,45 @@ class App:
         pyxel.cls(COL_BLACK)
 
         def _shop_content(cx, cy, cw, ch):
-            for i, key in enumerate(SHOP_KEYS):
-                item = ITEM_CATALOG[key]
-                col = COL_YELLOW if i == self.shop_idx else COL_WHITE
-                cursor = ">" if i == self.shop_idx else " "
-                affordable = self.player.gold >= item.value
-                name_col = col if affordable else COL_DARK_GRAY
-                pyxel.text(cx,           cy + i * 14,
-                           f"{cursor} {item.name}", name_col)
-                pyxel.text(cx + cw - 36, cy + i * 14, f"{item.value}G",
-                           COL_YELLOW if affordable else COL_DARK_GRAY)
+            # Mode tabs
+            for i, cmd in enumerate(SHOP_COMMANDS):
+                tab_col = COL_YELLOW if (cmd.lower() == self.shop_mode) else COL_DARK_GRAY
+                pyxel.text(cx + i * 40, cy, f"[{cmd}]", tab_col)
+            pyxel.text(cx + len(SHOP_COMMANDS) * 40, cy, "<>:Switch", COL_DARK_GRAY)
+            row_y = cy + 12
+
             p = self.player
+            if self.shop_mode == "buy":
+                for i, key in enumerate(SHOP_KEYS):
+                    item = ITEM_CATALOG[key]
+                    col = COL_YELLOW if i == self.shop_idx else COL_WHITE
+                    cursor = ">" if i == self.shop_idx else " "
+                    affordable = p.gold >= item.value
+                    name_col = col if affordable else COL_DARK_GRAY
+                    pyxel.text(cx,           row_y + i * 10,
+                               f"{cursor} {item.name[:18]}", name_col)
+                    pyxel.text(cx + cw - 42, row_y + i * 10, f"{item.value}G",
+                               COL_YELLOW if affordable else COL_DARK_GRAY)
+                if len(p.inventory) >= INV_MAX:
+                    pyxel.text(cx + 60, cy + ch - 16, "Bag Full!", COL_RED)
+                pyxel.text(cx, cy + ch - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
+            else:
+                inv = p.inventory
+                if not inv:
+                    pyxel.text(cx, row_y, "-- Empty --", COL_DARK_GRAY)
+                else:
+                    for i, item in enumerate(inv):
+                        equipped = (item is p.weapon or item is p.armor)
+                        col = COL_DARK_GRAY if equipped else (COL_YELLOW if i == self.shop_idx else COL_WHITE)
+                        cursor = ">" if i == self.shop_idx else " "
+                        sell_price = int(item.value * 0.3)
+                        tag = "[E]" if equipped else f"{sell_price}G"
+                        pyxel.text(cx,           row_y + i * 10,
+                                   f"{cursor} {item.name[:16]}", col)
+                        pyxel.text(cx + cw - 42, row_y + i * 10, tag, col)
+                pyxel.text(cx, cy + ch - 8, "Z:Sell  X:Back", COL_DARK_GRAY)
+
             pyxel.text(cx, cy + ch - 16, f"Gold: {p.gold}G", COL_YELLOW)
-            if len(p.inventory) >= INV_MAX:
-                pyxel.text(cx + 60, cy + ch - 16, "Bag Full!", COL_RED)
-            pyxel.text(cx, cy + ch - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
 
         self.shop_win.draw(_shop_content)
 
@@ -2411,7 +2466,7 @@ class App:
         self.sub_win.draw(_content)
 
     def draw_3d_view(self):
-        _draw_3d_view(self.wall_at, self.assets_loaded, self.dungeon_floor)
+        _draw_3d_view(self.wall_at)
 
     def draw_npcs(self):
         for npc in self.npcs:
