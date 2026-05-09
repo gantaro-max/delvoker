@@ -68,6 +68,7 @@ STATE_GUILD              = 10
 STATE_STAT_ALLOC         = 11
 STATE_BATTLE_TARGET_PART = 12
 STATE_REVIVE             = 13
+STATE_BATTLE_TARGET      = 21
 STATE_INV_GIVE_NPC       = 14
 STATE_HOME               = 15
 STATE_ENDING             = 16
@@ -111,7 +112,7 @@ COMMANDS       = ["Fight", "Flee"]
 TOWN_MENU           = ["Inn", "Guild", "Shop", "Stats", "Revive", "Home", "Enter Dungeon"]
 STAT_ALLOC_NAMES    = ["STR", "DEF", "AGI", "MAG"]
 STAT_ALLOC_ATTRS    = ["str_", "def_", "agi", "mag"]
-HOME_MENU           = ["Warehouse", "Renovate", "Training", "Back"]
+HOME_MENU           = ["Warehouse", "Renovate", "Training", "Bestiary", "Back"]
 HOME_TRAIN_STATS    = ["STR", "DEF", "MAG"]
 HOME_TRAIN_ATTRS    = ["str", "def", "mag"]
 HOME_RENOVATE_COSTS = [500, 1000, 2000, 4000, 8000]
@@ -124,6 +125,6 @@ _BGM_ZONES = {
     STATE_STAT_ALLOC: 0,   STATE_SHOP: 0,            STATE_HOME: 0,    STATE_REVIVE: 0,
     STATE_DUNGEON: 1,      STATE_DUNGEON_SKILL: 1,   STATE_DUNGEON_SHOP: 1,
     STATE_BATTLE_CMD: 2,   STATE_BATTLE_MSG: 2,      STATE_BATTLE_END: 2,
-    STATE_BATTLE_NPC_CMD: 2, STATE_BATTLE_TARGET_PART: 2,
+    STATE_BATTLE_NPC_CMD: 2, STATE_BATTLE_TARGET_PART: 2, STATE_BATTLE_TARGET: 2,
     STATE_ENDING: -1,
 }
