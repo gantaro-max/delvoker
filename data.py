@@ -293,6 +293,15 @@ class Skill:
         self.is_utility  = is_utility
 
 
+# Job-specific starting skills granted on character creation or job change.
+# effect_type: "provoke" | "quick_strike" | "mana_bolt" (handled in App._execute_active_skill)
+JOB_SKILLS: dict = {
+    "warrior": Skill("Provoke",       mp_cost=3, effect_type="provoke",      power=2),
+    "thief":   Skill("Quick Strike",  mp_cost=4, effect_type="quick_strike", power=0),
+    "mage":    Skill("Mana Bolt",     mp_cost=5, effect_type="mana_bolt",    power=3),
+}
+
+
 def make_enchanted_armor(base_key: str) -> EnchantedArmor:
     """ベース防具にウェイト抽選でエンチャントを付与したEnchantedArmorを返す。"""
     base = ITEM_CATALOG[base_key]

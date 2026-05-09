@@ -14,7 +14,7 @@ from constants import (
     STATE_BATTLE_NPC_CMD, STATE_GUILD, STATE_STAT_ALLOC,
     STATE_BATTLE_TARGET_PART, STATE_BATTLE_TARGET, STATE_REVIVE, STATE_INV_GIVE_NPC,
     STATE_HOME, STATE_ENDING, STATE_DUNGEON_SKILL, STATE_DUNGEON_SHOP,
-    STATE_TITLE, STATE_JOB_SELECT,
+    STATE_TITLE, STATE_JOB_SELECT, STATE_BATTLE_SKILL,
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
     TILE_FOUNTAIN, TILE_MERCHANT,
@@ -30,7 +30,7 @@ from data import (Status, ENEMY_CATALOG, ITEM_CATALOG, JOBS,
                   make_enchanted_weapon, EnchantedWeapon,
                   make_enchanted_armor, EnchantedArmor,
                   NPCMember, Party, ATTR_AFFINITY,
-                  Skill, MAX_SKILLS, GrimoireItem, Grave)
+                  Skill, MAX_SKILLS, GrimoireItem, Grave, JOB_SKILLS)
 from logic.map_generator import Map
 from systems.persistence import save_game, load_game, deserialize_item
 from ui.renderer_3d import draw_3d_view as _draw_3d_view
@@ -206,6 +206,10 @@ class App:
         self.home_train_idx = 0
         self.bestiary: dict[str, int] = {}
         self.bestiary_idx = 0
+
+        # Battle skill selection
+        self.skill_idx = 0
+        self._pending_skill = None
 
         # NPC command selection (unique NPCs)
         self.npc_cmd_idx = 0
@@ -536,6 +540,7 @@ class App:
             self.player.warehouse = warehouse
             self.player.warehouse_max = warehouse_max
             self.player.perm_stats = perm_stats
+            self._grant_job_skill(job_key)
             self.party = Party(self.player)
             demo_npc = NPCMember("warrior", "Gard", "reckless")
             self.party.add(demo_npc)
@@ -668,6 +673,9 @@ class App:
         """Select attack target based on enemy AI type."""
         alive = self.party.alive
         if not alive:
+            return self.player
+        # Provoke forces all enemies to target the player
+        if self.player.status_effects.get("provoke", 0) > 0:
             return self.player
         edef = ENEMY_CATALOG.get(
             self._current_enemy_key) if self._current_enemy_key else None
@@ -925,6 +933,9 @@ class App:
             target = self._get_enemy_target()
             base_dmg = self._calc_dmg(acting_enemy.weapon, target.total_def, target)
             dmg = int(base_dmg * power_mult)
+            # Provoke: 25% damage reduction while active
+            if target is self.player and self.player.status_effects.get("provoke", 0) > 0:
+                dmg = int(dmg * 0.75)
             target.hp = max(0, target.hp - dmg)
             pyxel.play(1, 1)
             if power_mult > 1:
@@ -942,6 +953,11 @@ class App:
                 target.status_effects[inf] = max(
                     target.status_effects.get(inf, 0), 3)
                 msgs.append(f"{target.name} is {inf}ed!")
+
+        # Provoke: tick down at end of each enemy turn round
+        prov = self.player.status_effects.get("provoke", 0)
+        if prov > 0:
+            self.player.status_effects["provoke"] = prov - 1
 
         # Poison damage at end of turn (once per round, not per enemy)
         for member in list(self.party.alive):
@@ -981,6 +997,7 @@ class App:
             self.state = STATE_BATTLE_CMD
             return
         if pyxel.btnp(pyxel.KEY_X):
+            self._pending_skill = None
             self.state = STATE_BATTLE_CMD
             return
         if pyxel.btnp(pyxel.KEY_UP):
@@ -989,14 +1006,19 @@ class App:
             self.target_idx = (self.target_idx + 1) % len(alive)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             self._attack_target = alive[self.target_idx]
-            parts = self._build_part_targets(self._attack_target)
-            if len(parts) > 1:
-                self._part_targets = parts
-                self.part_idx = 0
-                self.state = STATE_BATTLE_TARGET_PART
+            if self._pending_skill:
+                sk = self._pending_skill
+                self._pending_skill = None
+                self._execute_active_skill(sk, self._attack_target)
             else:
-                self.state = STATE_BATTLE_CMD
-                self._player_attack(self._attack_target)
+                parts = self._build_part_targets(self._attack_target)
+                if len(parts) > 1:
+                    self._part_targets = parts
+                    self.part_idx = 0
+                    self.state = STATE_BATTLE_TARGET_PART
+                else:
+                    self.state = STATE_BATTLE_CMD
+                    self._player_attack(self._attack_target)
 
     def _upd_battle_target_part(self):
         targets = self._part_targets
@@ -1013,6 +1035,17 @@ class App:
             target = self._attack_target or (self.enemies[0] if self.enemies else None)
             self.state = STATE_BATTLE_CMD
             self._player_attack(target, part_name)
+
+    def _grant_job_skill(self, job_key):
+        """Grant the job's initial skill to the player if not already learned."""
+        skill_proto = JOB_SKILLS.get(job_key)
+        if skill_proto is None:
+            return
+        already = any(s.name == skill_proto.name for s in self.player.skills)
+        if not already and len(self.player.skills) < MAX_SKILLS:
+            self.player.skills.append(
+                Skill(skill_proto.name, skill_proto.mp_cost,
+                      skill_proto.effect_type, skill_proto.power))
 
     def _try_flee(self):
         if self._current_enemy_key in ("dungeon_master", "archdemon"):
@@ -1103,6 +1136,8 @@ class App:
             self._upd_stat_alloc()
         elif self.state == STATE_BATTLE_TARGET:
             self._upd_battle_target()
+        elif self.state == STATE_BATTLE_SKILL:
+            self._upd_battle_skill()
         elif self.state == STATE_BATTLE_TARGET_PART:
             self._upd_battle_target_part()
         elif self.state == STATE_REVIVE:
@@ -1298,7 +1333,7 @@ class App:
         if pyxel.btnp(pyxel.KEY_DOWN):
             self.cmd_idx = (self.cmd_idx + 1) % len(COMMANDS)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
-            if self.cmd_idx == 0:
+            if self.cmd_idx == 0:  # Fight
                 if len(self.enemies) > 1:
                     self.target_idx = 0
                     self.state = STATE_BATTLE_TARGET
@@ -1313,8 +1348,73 @@ class App:
                             self.state = STATE_BATTLE_TARGET_PART
                         else:
                             self._player_attack(enemy)
-            else:
+            elif self.cmd_idx == 1:  # Skill
+                if self.player.skills:
+                    self.skill_idx = 0
+                    self.state = STATE_BATTLE_SKILL
+            else:  # Flee
                 self._try_flee()
+
+    def _upd_battle_skill(self):
+        skills = self.player.skills
+        if not skills:
+            self.state = STATE_BATTLE_CMD
+            return
+        if pyxel.btnp(pyxel.KEY_X):
+            self.state = STATE_BATTLE_CMD
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.skill_idx = (self.skill_idx - 1) % len(skills)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.skill_idx = (self.skill_idx + 1) % len(skills)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            sk = skills[self.skill_idx]
+            if self.player.mp < sk.mp_cost:
+                return  # not enough MP; stay on skill screen
+            if sk.effect_type == "provoke":
+                self._execute_active_skill(sk)
+            else:
+                if len(self.enemies) > 1:
+                    self._pending_skill = sk
+                    self.target_idx = 0
+                    self.state = STATE_BATTLE_TARGET
+                else:
+                    enemy = self.enemies[0] if self.enemies else None
+                    if enemy:
+                        self._execute_active_skill(sk, enemy)
+
+    def _execute_active_skill(self, skill, target=None):
+        p = self.player
+        p.mp -= skill.mp_cost
+        msgs = []
+        if skill.effect_type == "provoke":
+            p.status_effects["provoke"] = skill.power
+            msgs = [f"{p.name} uses Provoke! Enemies focus on {p.name}! (-25% dmg)"]
+            self._run_auto_and_enemy(msgs)
+        elif skill.effect_type == "quick_strike":
+            dmg = max(1, p.weapon.roll_damage() + p.agi // 2)
+            target.hp = max(0, target.hp - dmg)
+            msgs = [f"[Quick Strike] {target.name}: -{dmg} HP!"]
+            if target.hp <= 0:
+                self._handle_victory(msgs, target)
+            else:
+                self._run_auto_and_enemy(msgs)
+        elif skill.effect_type == "mana_bolt":
+            dmg = max(1, p.mag * skill.power)
+            target.hp = max(0, target.hp - dmg)
+            msgs = [f"[Mana Bolt] {target.name}: -{dmg} HP!"]
+            if target.hp <= 0:
+                self._handle_victory(msgs, target)
+            else:
+                self._run_auto_and_enemy(msgs)
+        else:  # generic grimoire attack
+            dmg = max(1, skill.power + p.mag)
+            target.hp = max(0, target.hp - dmg)
+            msgs = [f"[{skill.name}] {target.name}: -{dmg} HP!"]
+            if target.hp <= 0:
+                self._handle_victory(msgs, target)
+            else:
+                self._run_auto_and_enemy(msgs)
 
     def _upd_battle_msg(self):
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
@@ -1887,6 +1987,18 @@ class App:
                 pyxel.text(cx, cy + 40, npc.weapon.label(), COL_PEACH)
                 pyxel.text(6, cy + ch - 8,
                            "Z/Space:OK  Up/Down:Select", COL_DARK_GRAY)
+            elif self.state == STATE_BATTLE_SKILL:
+                p_skills = p.skills
+                pyxel.text(cx, cy, "Choose skill:", COL_YELLOW)
+                for i, sk in enumerate(p_skills):
+                    can_use = p.mp >= sk.mp_cost
+                    col = COL_YELLOW if i == self.skill_idx else (COL_WHITE if can_use else COL_DARK_GRAY)
+                    cur = ">" if i == self.skill_idx else " "
+                    pyxel.text(cx, cy + 12 + i * 14,
+                               f"{cur} {sk.name[:10]}  MP:{sk.mp_cost}", col)
+                pyxel.text(cx, cy + ch - 20, f"MP: {p.mp}/{p.max_mp}", COL_BLUE)
+                pyxel.text(6, cy + ch - 8,
+                           "Z:OK  X:Cancel  Up/Down:Select", COL_DARK_GRAY)
             elif self.state == STATE_BATTLE_TARGET:
                 pyxel.text(cx, cy, "Choose target:", COL_YELLOW)
                 for i, e in enumerate(alive_for_target):
