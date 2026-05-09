@@ -271,12 +271,12 @@ class App:
         pyxel.sounds[1].set("c1", "n", "6", "f", 8)
         # SE 2: heal arpeggio (rising triangle)
         pyxel.sounds[2].set("c2e2g2c3", "t", "5555", "nnnn", 8)
-        # BGM 3: Town (calm square wave melody)
-        pyxel.sounds[3].set("e3g3a3g3e3c3d3e3", "s", "5", "n", 18)
+        # BGM 3: Town (calm triangle melody)
+        pyxel.sounds[3].set("e3g3a3g3e3c3d3e3", "t", "3", "n", 18)
         # BGM 4: Dungeon (ominous triangle drone)
-        pyxel.sounds[4].set("c2c2a1a1g1g1a1a1", "t", "4", "n", 22)
-        # BGM 5: Battle (upbeat pulse)
-        pyxel.sounds[5].set("c3e3g3b3c4b3g3e3", "p", "6", "n", 12)
+        pyxel.sounds[4].set("c2c2a1a1g1g1a1a1", "t", "2", "n", 22)
+        # BGM 5: Battle (triangle upbeat)
+        pyxel.sounds[5].set("c3e3g3b3c4b3g3e3", "t", "3", "n", 12)
         pyxel.musics[0].set([3], [], [], [])
         pyxel.musics[1].set([4], [], [], [])
         pyxel.musics[2].set([5], [], [], [])
@@ -1870,9 +1870,10 @@ class App:
                     pyxel.text(cx, cy + i * 16, f"{cursor} {cmd}", col)
                 pyxel.text(cx, cy + 40, p.weapon.label(), COL_PEACH)
                 if p.skills:
-                    skill_names = "  ".join(s.name[:8] for s in p.skills)
-                    pyxel.text(
-                        cx, cy + 52, f"Skills: {skill_names}", COL_INDIGO)
+                    for si, sk in enumerate(p.skills):
+                        gx = cx + (si % 2) * 60
+                        gy = cy + 52 + (si // 2) * 8
+                        pyxel.text(gx, gy, sk.name[:9], COL_INDIGO)
                 pyxel.text(6, cy + ch - 8,
                            "Z/Space:OK  Up/Down:Select", COL_DARK_GRAY)
             elif self.state == STATE_BATTLE_NPC_CMD:
@@ -2148,12 +2149,12 @@ class App:
                         cur = ">" if (self.home_wh_side == 0 and i == self.home_wh_idx) else " "
                         col = COL_YELLOW if (self.home_wh_side == 0 and i == self.home_wh_idx) else COL_WHITE
                         name = bag[i].label() if hasattr(bag[i], "label") else bag[i].name
-                        pyxel.text(cx, cy + 12 + i * 10, f"{cur}{name[:22]}", col)
+                        pyxel.text(cx, cy + 12 + i * 10, f"{cur}{name[:18]}", col)
                     if i < len(storage):
                         cur = ">" if (self.home_wh_side == 1 and i == self.home_wh_idx) else " "
                         col = COL_YELLOW if (self.home_wh_side == 1 and i == self.home_wh_idx) else COL_WHITE
                         name = storage[i].label() if hasattr(storage[i], "label") else storage[i].name
-                        pyxel.text(cx + half + 3, cy + 12 + i * 10, f"{cur}{name[:22]}", col)
+                        pyxel.text(cx + half + 3, cy + 12 + i * 10, f"{cur}{name[:18]}", col)
                 pyxel.text(cx, cy + ch - 8, "Z:Transfer  L/R:Side  X:Back", COL_DARK_GRAY)
             self.inv_win.draw(_wh)
 
