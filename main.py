@@ -2411,7 +2411,7 @@ class App:
         self.sub_win.draw(_content)
 
     def draw_3d_view(self):
-        _draw_3d_view(self.wall_at)
+        _draw_3d_view(self.wall_at, self.assets_loaded, self.dungeon_floor)
 
     def draw_npcs(self):
         for npc in self.npcs:
