@@ -109,11 +109,28 @@ class Enemy:
         self.part_hps = {p["name"]: max(
             1, int(edef.hp * p["hp_ratio"])) for p in edef.parts}
         self.broken_parts = set()
+        self.sprite_u = edef.sprite_u
+        self.sprite_v = edef.sprite_v
+
+
+class Effect:
+    SPARK_OFFSETS = [(-3, -3), (3, -3), (-3, 3), (3, 3), (0, -4), (0, 4)]
+
+    def __init__(self, x, y, effect_type="spark"):
+        self.x = x
+        self.y = y
+        self.timer = 20
+        self.type = effect_type
 
 
 class App:
     def __init__(self):
         pyxel.init(SCREEN_W, SCREEN_H, title=TITLE, fps=FPS)
+        try:
+            pyxel.load("assets.pyxres")
+            self.assets_loaded = True
+        except Exception:
+            self.assets_loaded = False
         self.px = 1
         self.py = 1
         self.dir = 1
@@ -141,6 +158,9 @@ class App:
 
         # Damage / heal popups  {"text", "x", "y", "color", "timer"}
         self.popups = []
+
+        # Battle effects (spark, etc.)
+        self.effects = []
 
         # Town state
         self.town_cmd_idx = 0
@@ -821,6 +841,7 @@ class App:
         popup_col = COL_YELLOW if (
             attr and attr in self.enemy.weaknesses) else COL_WHITE
         self.add_popup(f"-{dmg}", 116, 68, popup_col)
+        self.effects.append(Effect(128, 63, "spark"))
 
         msgs = [f"{self.enemy.name}: -{dmg} HP!"]
 
@@ -991,6 +1012,11 @@ class App:
         self.popups = [p for p in self.popups if p["timer"] > 0]
         for p in self.popups:
             p["timer"] -= 1
+
+        # Tick effects
+        self.effects = [e for e in self.effects if e.timer > 0]
+        for e in self.effects:
+            e.timer -= 1
 
         self.town_win.update()
         self.status_win.update()
@@ -1688,9 +1714,17 @@ class App:
 
         # Enemy area
         ex, ey, ew, eh = 88, 28, 80, 70
-        pyxel.rect(ex, ey, ew, eh, COL_RED)
         nx = ex + (ew - len(self.enemy.name) * 4) // 2
         pyxel.text(nx, ey - 10, self.enemy.name, COL_WHITE)
+        # Draw enemy sprite (blt) if assets loaded, else fallback rect
+        sprite_x = ex + (ew - 32) // 2
+        sprite_y = ey + (eh - 32) // 2
+        if self.assets_loaded:
+            pyxel.blt(sprite_x, sprite_y, 0,
+                      self.enemy.sprite_u, self.enemy.sprite_v,
+                      32, 32, 0)
+        else:
+            pyxel.rect(ex, ey, ew, eh, COL_RED)
         bx, by, bw_ = ex, ey + eh + 4, ew
         e_hp_f = self.enemy.hp / self.enemy.max_hp
         pyxel.rect(bx, by, bw_, 4, COL_DARK_GRAY)
@@ -1802,6 +1836,13 @@ class App:
                            "Z:Continue", COL_DARK_GRAY)
 
         self.battle_win.draw(_panel_content)
+
+        # Hit effects (spark)
+        for eff in self.effects:
+            fade = eff.timer > 10
+            col = COL_YELLOW if fade else COL_ORANGE
+            for dx, dy in Effect.SPARK_OFFSETS:
+                pyxel.pset(eff.x + dx, eff.y + dy, col)
 
         # Damage / heal popups (float upward)
         for pop in self.popups:
