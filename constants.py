@@ -100,7 +100,8 @@ SHOP_KEYS     = [
     "herb", "potion", "ether", "antidote", "scroll_mapping",
     "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return",
 ]
-MERCHANT_KEYS = ["elixir", "potion", "ether", "antidote", "holy_scroll", "grimoire_heal"]
+MERCHANT_KEYS  = ["elixir", "potion", "ether", "antidote", "holy_scroll", "grimoire_heal"]
+SHOP_COMMANDS  = ["Buy", "Sell"]
 
 # Battle / progression
 PROMOTION_COST = 1000
