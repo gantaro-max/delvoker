@@ -12,7 +12,7 @@ from constants import (
     STATE_BATTLE_CMD, STATE_BATTLE_MSG, STATE_BATTLE_END,
     STATE_INVENTORY, STATE_INV_ACTION, STATE_SHOP,
     STATE_BATTLE_NPC_CMD, STATE_GUILD, STATE_STAT_ALLOC,
-    STATE_BATTLE_TARGET_PART, STATE_REVIVE, STATE_INV_GIVE_NPC,
+    STATE_BATTLE_TARGET_PART, STATE_BATTLE_TARGET, STATE_REVIVE, STATE_INV_GIVE_NPC,
     STATE_HOME, STATE_ENDING, STATE_DUNGEON_SKILL, STATE_DUNGEON_SHOP,
     STATE_TITLE, STATE_JOB_SELECT,
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
@@ -146,7 +146,9 @@ class App:
         self.npcs = []
 
         # Battle state
-        self.enemy = None
+        self.enemies = []
+        self.target_idx = 0
+        self._attack_target = None
         self.cmd_idx = 0
         self.messages = []
         self.msg_idx = 0
@@ -154,7 +156,7 @@ class App:
         self.battle_won = False
         self.level_up_gains = []
         self._current_enemy_key = None
-        self.enemy_telegraphing = False
+        self.telegraphing = {}
 
         # Damage / heal popups  {"text", "x", "y", "color", "timer"}
         self.popups = []
@@ -633,9 +635,13 @@ class App:
     def _start_battle(self, enemy_key=None):
         key = enemy_key if enemy_key else random.choice(
             _encounter_pool(self.dungeon_floor))
-        self.enemy = Enemy(ENEMY_CATALOG[key])
+        e = Enemy(ENEMY_CATALOG[key])
+        e.enemy_key = key
+        self.enemies = [e]
         self._current_enemy_key = key
-        self.enemy_telegraphing = False
+        self.telegraphing = {}
+        self.target_idx = 0
+        self._attack_target = None
         self.cmd_idx = 0
         self.battle_win.close()
         self.battle_win.open()
@@ -670,7 +676,10 @@ class App:
             return min(alive, key=lambda m: m.hp)
         return alive[0]  # normal: attack first (player)
 
-    def _npc_combat_action(self, npc, msgs):
+    def _npc_combat_action(self, npc, msgs, enemy_target=None):
+        etgt = enemy_target or (self.enemies[0] if self.enemies else None)
+        if etgt is None:
+            return
         p = npc.personality
 
         if p == "reckless":
@@ -680,14 +689,14 @@ class App:
                 skill = random.choice(attack_skills)
                 npc.mp -= skill.mp_cost
                 dmg = max(1, skill.power + npc.mag)
-                self.enemy.hp = max(0, self.enemy.hp - dmg)
+                etgt.hp = max(0, etgt.hp - dmg)
                 msgs.append(
-                    f"[Skill] {npc.name} uses {skill.name}! {self.enemy.name}: -{dmg} HP!")
+                    f"[Skill] {npc.name} uses {skill.name}! {etgt.name}: -{dmg} HP!")
             else:
-                dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
-                self.enemy.hp = max(0, self.enemy.hp - dmg)
+                dmg = self._calc_dmg(npc.weapon, etgt.def_, etgt)
+                etgt.hp = max(0, etgt.hp - dmg)
                 msgs.append(
-                    f"[Reckless] {npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
+                    f"[Reckless] {npc.name} attacks! {etgt.name}: -{dmg} HP!")
 
         elif p == "cowardly":
             hurt = [m for m in self.party.alive if m.hp < m.max_hp * 0.5]
@@ -712,9 +721,9 @@ class App:
                 npc.mp -= skill.mp_cost
                 if skill.effect_type == "attack":
                     dmg = max(1, skill.power + npc.mag)
-                    self.enemy.hp = max(0, self.enemy.hp - dmg)
+                    etgt.hp = max(0, etgt.hp - dmg)
                     msgs.append(
-                        f"[Skill] {npc.name} uses {skill.name}! {self.enemy.name}: -{dmg} HP!")
+                        f"[Skill] {npc.name} uses {skill.name}! {etgt.name}: -{dmg} HP!")
                 else:
                     alive = self.party.alive
                     if alive:
@@ -724,13 +733,15 @@ class App:
                         msgs.append(
                             f"[Skill] {npc.name} uses {skill.name}! {target.name}: +{heal} HP!")
             else:
-                dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
-                self.enemy.hp = max(0, self.enemy.hp - dmg)
-                msgs.append(f"{npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
+                dmg = self._calc_dmg(npc.weapon, etgt.def_, etgt)
+                etgt.hp = max(0, etgt.hp - dmg)
+                msgs.append(f"{npc.name} attacks! {etgt.name}: -{dmg} HP!")
 
-    def _handle_victory(self, msgs):
-        exp = self.enemy.exp_reward
-        gold = self.enemy.gold_reward
+    def _handle_victory(self, msgs, enemy=None):
+        if enemy and enemy in self.enemies:
+            self.enemies.remove(enemy)
+        exp = enemy.exp_reward if enemy else 0
+        gold = enemy.gold_reward if enemy else 0
         self.player.gold += gold
         level_ups = self.player.gain_exp(exp)
         self.level_up_gains = level_ups
@@ -775,11 +786,11 @@ class App:
                     f"Got: {drop_item.label() if hasattr(drop_item, 'label') else drop_item.name}!")
             else:
                 msgs.append("Bag full! Item lost.")
-        if self.enemy and self._current_enemy_key:
+        if enemy and self._current_enemy_key:
             edef = ENEMY_CATALOG.get(self._current_enemy_key)
             if edef:
                 for p in edef.parts:
-                    if p["name"] in self.enemy.broken_parts and random.random() < 0.2:
+                    if p["name"] in enemy.broken_parts and random.random() < 0.2:
                         drop_key = p.get("drop_flag")
                         if drop_key and drop_key in ITEM_CATALOG:
                             drop_item = ITEM_CATALOG[drop_key].clone()
@@ -819,41 +830,46 @@ class App:
             self._show_msgs(msgs, STATE_BATTLE_END)
 
     def _run_auto_and_enemy(self, msgs):
+        target = self.enemies[0] if self.enemies else None
         for npc in self.party.alive[1:]:
             if getattr(npc, "is_unique", False):
                 continue
-            if self.enemy.hp <= 0:
+            if not target or target.hp <= 0:
                 break
-            self._npc_combat_action(npc, msgs)
-        if self.enemy.hp <= 0:
-            self._handle_victory(msgs)
-        else:
+            self._npc_combat_action(npc, msgs, target)
+        if target and target.hp <= 0:
+            self._handle_victory(msgs, target)
+        elif self.enemies:
             self._enemy_turn(msgs)
 
-    def _player_attack(self, part_name=None):
+    def _player_attack(self, enemy=None, part_name=None):
+        if enemy is None:
+            enemy = self.enemies[0] if self.enemies else None
+        if enemy is None:
+            return
         pyxel.play(0, 0)
-        dmg = self._calc_dmg(self.player.weapon, self.enemy.def_, self.enemy)
+        dmg = self._calc_dmg(self.player.weapon, enemy.def_, enemy)
         dmg = max(1, dmg + self.player.perm_stats["str"])
-        self.enemy.hp = max(0, self.enemy.hp - dmg)
+        enemy.hp = max(0, enemy.hp - dmg)
         pyxel.play(1, 1)
 
         attr = getattr(self.player.weapon, "attribute", None)
         popup_col = COL_YELLOW if (
-            attr and attr in self.enemy.weaknesses) else COL_WHITE
+            attr and attr in enemy.weaknesses) else COL_WHITE
         self.add_popup(f"-{dmg}", 116, 68, popup_col)
         self.effects.append(Effect(128, 63, "spark"))
 
-        msgs = [f"{self.enemy.name}: -{dmg} HP!"]
+        msgs = [f"{enemy.name}: -{dmg} HP!"]
 
-        if part_name and part_name in self.enemy.part_hps and part_name not in self.enemy.broken_parts:
-            self.enemy.part_hps[part_name] = max(
-                0, self.enemy.part_hps[part_name] - dmg)
-            if self.enemy.part_hps[part_name] <= 0:
-                self.enemy.broken_parts.add(part_name)
+        if part_name and part_name in enemy.part_hps and part_name not in enemy.broken_parts:
+            enemy.part_hps[part_name] = max(
+                0, enemy.part_hps[part_name] - dmg)
+            if enemy.part_hps[part_name] <= 0:
+                enemy.broken_parts.add(part_name)
                 msgs.append(f"[PART BROKEN: {part_name}]")
 
-        if self.enemy.hp <= 0:
-            self._handle_victory(msgs)
+        if enemy.hp <= 0:
+            self._handle_victory(msgs, enemy)
             return
         self._round_msgs = msgs
         self._npc_cmd_queue = [m for m in self.party.alive[1:]
@@ -886,42 +902,43 @@ class App:
     def _enemy_turn(self, msgs=None):
         if msgs is None:
             msgs = []
-        edef = ENEMY_CATALOG.get(
-            self._current_enemy_key) if self._current_enemy_key else None
+        for acting_enemy in list(self.enemies):
+            edef = ENEMY_CATALOG.get(
+                getattr(acting_enemy, "enemy_key", self._current_enemy_key))
 
-        # Boss telegraph: show warning turn before power attack
-        if edef and edef.telegraph_message and not self.enemy_telegraphing and random.random() < 0.3:
-            self.enemy_telegraphing = True
-            msgs.append(edef.telegraph_message)
-            self._show_msgs(msgs, STATE_BATTLE_CMD)
-            return
+            eid = id(acting_enemy)
+            # Boss telegraph: show warning turn before power attack
+            if edef and edef.telegraph_message and not self.telegraphing.get(eid) and random.random() < 0.3:
+                self.telegraphing[eid] = True
+                msgs.append(edef.telegraph_message)
+                self._show_msgs(msgs, STATE_BATTLE_CMD)
+                return
 
-        power_mult = 2 if self.enemy_telegraphing else 1
-        self.enemy_telegraphing = False
+            power_mult = 2 if self.telegraphing.pop(eid, False) else 1
 
-        pyxel.play(0, 0)
-        target = self._get_enemy_target()
-        base_dmg = self._calc_dmg(self.enemy.weapon, target.total_def, target)
-        dmg = int(base_dmg * power_mult)
-        target.hp = max(0, target.hp - dmg)
-        pyxel.play(1, 1)
-        if power_mult > 1:
-            msgs.append(f"[POWER] {target.name}: -{dmg} HP!")
-        else:
-            msgs.append(f"{target.name}: -{dmg} HP!")
+            pyxel.play(0, 0)
+            target = self._get_enemy_target()
+            base_dmg = self._calc_dmg(acting_enemy.weapon, target.total_def, target)
+            dmg = int(base_dmg * power_mult)
+            target.hp = max(0, target.hp - dmg)
+            pyxel.play(1, 1)
+            if power_mult > 1:
+                msgs.append(f"[POWER] {target.name}: -{dmg} HP!")
+            else:
+                msgs.append(f"{target.name}: -{dmg} HP!")
 
-        # Popup for incoming damage and screen shake
-        self.add_popup(f"-{dmg}", 46, 126, COL_RED)
-        self.shake_timer = 5
+            # Popup for incoming damage and screen shake
+            self.add_popup(f"-{dmg}", 46, 126, COL_RED)
+            self.shake_timer = 5
 
-        # Status infliction
-        if edef and edef.inflict_status and random.random() < edef.inflict_chance:
-            inf = edef.inflict_status
-            target.status_effects[inf] = max(
-                target.status_effects.get(inf, 0), 3)
-            msgs.append(f"{target.name} is {inf}ed!")
+            # Status infliction
+            if edef and edef.inflict_status and random.random() < edef.inflict_chance:
+                inf = edef.inflict_status
+                target.status_effects[inf] = max(
+                    target.status_effects.get(inf, 0), 3)
+                msgs.append(f"{target.name} is {inf}ed!")
 
-        # Poison damage at end of turn
+        # Poison damage at end of turn (once per round, not per enemy)
         for member in list(self.party.alive):
             turns = member.status_effects.get("poison", 0)
             if turns > 0:
@@ -944,13 +961,37 @@ class App:
         else:
             self._show_msgs(msgs, STATE_BATTLE_CMD)
 
-    def _build_part_targets(self):
+    def _build_part_targets(self, enemy=None):
+        e = enemy or (self.enemies[0] if self.enemies else None)
         targets = ["Body"]
-        if self.enemy:
-            for p in self.enemy.parts:
-                if p["name"] not in self.enemy.broken_parts:
+        if e:
+            for p in e.parts:
+                if p["name"] not in e.broken_parts:
                     targets.append(p["name"])
         return targets
+
+    def _upd_battle_target(self):
+        alive = [e for e in self.enemies if e.hp > 0]
+        if not alive:
+            self.state = STATE_BATTLE_CMD
+            return
+        if pyxel.btnp(pyxel.KEY_X):
+            self.state = STATE_BATTLE_CMD
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.target_idx = (self.target_idx - 1) % len(alive)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.target_idx = (self.target_idx + 1) % len(alive)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            self._attack_target = alive[self.target_idx]
+            parts = self._build_part_targets(self._attack_target)
+            if len(parts) > 1:
+                self._part_targets = parts
+                self.part_idx = 0
+                self.state = STATE_BATTLE_TARGET_PART
+            else:
+                self.state = STATE_BATTLE_CMD
+                self._player_attack(self._attack_target)
 
     def _upd_battle_target_part(self):
         targets = self._part_targets
@@ -964,8 +1005,9 @@ class App:
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             sel = targets[self.part_idx]
             part_name = None if sel == "Body" else sel
+            target = self._attack_target or (self.enemies[0] if self.enemies else None)
             self.state = STATE_BATTLE_CMD
-            self._player_attack(part_name)
+            self._player_attack(target, part_name)
 
     def _try_flee(self):
         if self._current_enemy_key in ("dungeon_master", "archdemon"):
@@ -1054,6 +1096,8 @@ class App:
             self._upd_guild()
         elif self.state == STATE_STAT_ALLOC:
             self._upd_stat_alloc()
+        elif self.state == STATE_BATTLE_TARGET:
+            self._upd_battle_target()
         elif self.state == STATE_BATTLE_TARGET_PART:
             self._upd_battle_target_part()
         elif self.state == STATE_REVIVE:
@@ -1198,16 +1242,17 @@ class App:
             self.npc_cmd_idx = (self.npc_cmd_idx + 1) % len(COMMANDS)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             npc = self.current_npc_actor
-            if self.npc_cmd_idx == 0:  # Fight
-                dmg = self._calc_dmg(npc.weapon, self.enemy.def_, self.enemy)
-                self.enemy.hp = max(0, self.enemy.hp - dmg)
+            etgt = self.enemies[0] if self.enemies else None
+            if self.npc_cmd_idx == 0 and etgt:  # Fight
+                dmg = self._calc_dmg(npc.weapon, etgt.def_, etgt)
+                etgt.hp = max(0, etgt.hp - dmg)
                 self._round_msgs.append(
-                    f"{npc.name} attacks! {self.enemy.name}: -{dmg} HP!")
+                    f"{npc.name} attacks! {etgt.name}: -{dmg} HP!")
             else:  # Retreat
                 self._round_msgs.append(f"{npc.name} holds back.")
 
-            if self.enemy.hp <= 0:
-                self._handle_victory(self._round_msgs)
+            if etgt and etgt.hp <= 0:
+                self._handle_victory(self._round_msgs, etgt)
             elif self._npc_cmd_queue:
                 self.current_npc_actor = self._npc_cmd_queue.pop(0)
                 self.npc_cmd_idx = 0
@@ -1249,13 +1294,20 @@ class App:
             self.cmd_idx = (self.cmd_idx + 1) % len(COMMANDS)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             if self.cmd_idx == 0:
-                targets = self._build_part_targets()
-                if len(targets) > 1:
-                    self._part_targets = targets
-                    self.part_idx = 0
-                    self.state = STATE_BATTLE_TARGET_PART
+                if len(self.enemies) > 1:
+                    self.target_idx = 0
+                    self.state = STATE_BATTLE_TARGET
                 else:
-                    self._player_attack()
+                    enemy = self.enemies[0] if self.enemies else None
+                    if enemy:
+                        self._attack_target = enemy
+                        targets = self._build_part_targets(enemy)
+                        if len(targets) > 1:
+                            self._part_targets = targets
+                            self.part_idx = 0
+                            self.state = STATE_BATTLE_TARGET_PART
+                        else:
+                            self._player_attack(enemy)
             else:
                 self._try_flee()
 
@@ -1265,14 +1317,14 @@ class App:
             if self.msg_idx >= len(self.messages):
                 ns = self.next_state
                 if ns in (STATE_DUNGEON, STATE_TOWN, STATE_ENDING):
-                    self.enemy = None
+                    self.enemies = []
                     self._set_state(ns)
                 else:
                     self.state = ns
 
     def _upd_battle_end(self):
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
-            self.enemy = None
+            self.enemies = []
             self.level_up_gains = []
             if self.party.is_wiped_out:
                 for m in self.party.members:
@@ -1712,25 +1764,44 @@ class App:
     def _draw_battle(self):
         pyxel.cls(COL_BLACK)
 
-        # Enemy area
-        ex, ey, ew, eh = 88, 28, 80, 70
-        nx = ex + (ew - len(self.enemy.name) * 4) // 2
-        pyxel.text(nx, ey - 10, self.enemy.name, COL_WHITE)
-        # Draw enemy sprite (blt) if assets loaded, else fallback rect
-        sprite_x = ex + (ew - 32) // 2
-        sprite_y = ey + (eh - 32) // 2
-        if self.assets_loaded:
-            pyxel.blt(sprite_x, sprite_y, 0,
-                      self.enemy.sprite_u, self.enemy.sprite_v,
-                      32, 32, 0)
-        else:
-            pyxel.rect(ex, ey, ew, eh, COL_RED)
-        bx, by, bw_ = ex, ey + eh + 4, ew
-        e_hp_f = self.enemy.hp / self.enemy.max_hp
-        pyxel.rect(bx, by, bw_, 4, COL_DARK_GRAY)
-        pyxel.rect(bx, by, int(bw_ * e_hp_f), 4, COL_GREEN)
-        pyxel.text(
-            bx, by + 6, f"HP {self.enemy.hp}/{self.enemy.max_hp}", COL_LIGHT_GRAY)
+        # Enemy area — distribute enemies horizontally
+        n = max(len(self.enemies), 1)
+        slot_w = SCREEN_W // n
+        ey, eh = 28, 64
+        alive_for_target = [e for e in self.enemies if e.hp > 0]
+
+        for i, enemy in enumerate(self.enemies):
+            cx = slot_w // 2 + i * slot_w  # horizontal center of this slot
+
+            # Name
+            name_x = max(0, cx - len(enemy.name) * 2)
+            col_name = COL_LIGHT_GRAY if enemy.hp <= 0 else COL_WHITE
+            pyxel.text(name_x, ey - 10, enemy.name, col_name)
+
+            # Sprite / fallback rect
+            sprite_x = cx - 16
+            sprite_y = ey + (eh - 32) // 2
+            if self.assets_loaded:
+                pyxel.blt(sprite_x, sprite_y, 0,
+                          enemy.sprite_u, enemy.sprite_v, 32, 32, 0)
+            else:
+                rect_col = COL_DARK_GRAY if enemy.hp <= 0 else COL_RED
+                pyxel.rect(cx - 16, ey, 32, 40, rect_col)
+
+            # HP bar
+            bar_w = min(80, slot_w - 4)
+            bx = cx - bar_w // 2
+            by = ey + eh + 2
+            e_hp_f = enemy.hp / enemy.max_hp if enemy.max_hp > 0 else 0
+            pyxel.rect(bx, by, bar_w, 3, COL_DARK_GRAY)
+            pyxel.rect(bx, by, int(bar_w * e_hp_f), 3, COL_GREEN)
+            pyxel.text(bx, by + 5, f"HP {enemy.hp}/{enemy.max_hp}", COL_LIGHT_GRAY)
+
+            # Target cursor (STATE_BATTLE_TARGET)
+            if (self.state == STATE_BATTLE_TARGET and
+                    enemy in alive_for_target and
+                    alive_for_target.index(enemy) == self.target_idx):
+                pyxel.text(cx - 4, by + 14, "^", COL_YELLOW)
 
         pyxel.line(0, 122, SCREEN_W - 1, 122, COL_DARK_GRAY)
 
@@ -1788,14 +1859,23 @@ class App:
                 pyxel.text(cx, cy + 40, npc.weapon.label(), COL_PEACH)
                 pyxel.text(6, cy + ch - 8,
                            "Z/Space:OK  Up/Down:Select", COL_DARK_GRAY)
+            elif self.state == STATE_BATTLE_TARGET:
+                pyxel.text(cx, cy, "Choose target:", COL_YELLOW)
+                for i, e in enumerate(alive_for_target):
+                    col = COL_YELLOW if i == self.target_idx else COL_WHITE
+                    cur = ">" if i == self.target_idx else " "
+                    pyxel.text(cx, cy + 12 + i * 14, f"{cur} {e.name}", col)
+                pyxel.text(6, cy + ch - 8,
+                           "Z:OK  X:Cancel  Up/Down:Select", COL_DARK_GRAY)
             elif self.state == STATE_BATTLE_TARGET_PART:
+                tgt_enemy = self._attack_target or (self.enemies[0] if self.enemies else None)
                 pyxel.text(cx, cy, "Target:", COL_YELLOW)
                 for i, t in enumerate(self._part_targets):
                     col = COL_YELLOW if i == self.part_idx else COL_WHITE
                     cur = ">" if i == self.part_idx else " "
                     hp_info = ""
-                    if t != "Body" and self.enemy and t in self.enemy.part_hps:
-                        hp_info = f" HP:{self.enemy.part_hps[t]}"
+                    if t != "Body" and tgt_enemy and t in tgt_enemy.part_hps:
+                        hp_info = f" HP:{tgt_enemy.part_hps[t]}"
                     pyxel.text(cx, cy + 12 + i * 14,
                                f"{cur} {t}{hp_info}", col)
                 pyxel.text(6, cy + ch - 8,
