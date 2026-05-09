@@ -1268,8 +1268,8 @@ class App:
                     self.npcs.remove(npc)
                     self._start_battle(npc.enemy_key)
                     return
-            if self.steps_since_encounter >= 3:
-                rate = ENCOUNTER_RATE * min(1.0, (self.steps_since_encounter - 2) / 7.0)
+            if self.steps_since_encounter >= 4:
+                rate = ENCOUNTER_RATE * min(1.0, (self.steps_since_encounter - 3) / 7.0)
                 if random.random() < rate:
                     self._start_battle()
                     return
