@@ -1,116 +1,56 @@
 import pyxel
 import random
-import json
 from pathlib import Path
+from constants import (
+    SCREEN_W, SCREEN_H, FPS, TITLE,
+    COL_BLACK, COL_NAVY, COL_DARK_PURPLE, COL_DARK_GREEN, COL_BROWN,
+    COL_DARK_GRAY, COL_LIGHT_GRAY, COL_WHITE, COL_RED, COL_ORANGE,
+    COL_YELLOW, COL_GREEN, COL_BLUE, COL_INDIGO, COL_PINK, COL_PEACH,
+    VIEW_H, STATUS_Y, MAX_DEPTH, MAX_FLOOR,
+    FRAMES, WALL_COLS, DUNGEON_MAP, DIR_VECTORS, DIR_NAMES,
+    STATE_TOWN, STATE_TOWN_SUB, STATE_DUNGEON,
+    STATE_BATTLE_CMD, STATE_BATTLE_MSG, STATE_BATTLE_END,
+    STATE_INVENTORY, STATE_INV_ACTION, STATE_SHOP,
+    STATE_BATTLE_NPC_CMD, STATE_GUILD, STATE_STAT_ALLOC,
+    STATE_BATTLE_TARGET_PART, STATE_REVIVE, STATE_INV_GIVE_NPC,
+    STATE_HOME, STATE_ENDING, STATE_DUNGEON_SKILL, STATE_DUNGEON_SHOP,
+    STATE_TITLE, STATE_JOB_SELECT,
+    TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
+    TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
+    TILE_FOUNTAIN, TILE_MERCHANT,
+    SAVE_FILE, INV_MAX, SHOP_KEYS, MERCHANT_KEYS,
+    PROMOTION_COST, DROP_RATE, ENCOUNTER_RATE, FLEE_RATE, COMMANDS,
+    TOWN_MENU, STAT_ALLOC_NAMES, STAT_ALLOC_ATTRS,
+    HOME_MENU, HOME_TRAIN_STATS, HOME_TRAIN_ATTRS,
+    HOME_RENOVATE_COSTS, HOME_RENOVATE_SLOTS,
+    _BGM_ZONES,
+)
 from data import (Status, ENEMY_CATALOG, ITEM_CATALOG, JOBS,
                   WeaponItem, ArmorItem, ConsumableItem,
                   make_enchanted_weapon, EnchantedWeapon,
                   make_enchanted_armor, EnchantedArmor,
                   NPCMember, Party, ATTR_AFFINITY,
-                  Skill, MAX_SKILLS, GrimoireItem,
-                  Map, TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
-                  TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
-                  TILE_FOUNTAIN, TILE_MERCHANT, Grave)
+                  Skill, MAX_SKILLS, GrimoireItem, Grave)
+from logic.map_generator import Map
+from systems.persistence import save_game, load_game, deserialize_item
+from ui.renderer_3d import draw_3d_view as _draw_3d_view
 from window import Window
 from npc import NPC
 
-SCREEN_W = 256
-SCREEN_H = 256
-FPS = 30
-TITLE = "Delvoker"
-
-COL_BLACK = 0
-COL_NAVY = 1
-COL_DARK_PURPLE = 2
-COL_DARK_GREEN = 3
-COL_BROWN = 4
-COL_DARK_GRAY = 5
-COL_LIGHT_GRAY = 6
-COL_WHITE = 7
-COL_RED = 8
-COL_ORANGE = 9
-COL_YELLOW = 10
-COL_GREEN = 11
-COL_BLUE = 12
-COL_INDIGO = 13
-COL_PINK = 14
-COL_PEACH = 15
-
-VIEW_H = 176
-STATUS_Y = VIEW_H
-MAX_DEPTH = 4
-MAX_FLOOR = 10
-
-FRAMES = [
-    (0,   0,   255, 175),
-    (45,  31,  210, 144),
-    (74,  51,  181, 125),
-    (93,  64,  163, 112),
-    (105, 72,  150, 103),
-]
-
-WALL_COLS = [COL_GREEN, COL_DARK_GREEN, COL_DARK_GREEN, COL_NAVY]
-
-# Static fallback map (used only when _dungeon_map is None)
-DUNGEON_MAP = [
-    [1, 1, 1, 1, 1, 1, 1, 1],
-    [1, 0, 0, 0, 1, 0, 0, 1],
-    [1, 0, 1, 0, 0, 0, 1, 1],
-    [1, 0, 1, 0, 1, 0, 0, 1],
-    [1, 0, 0, 0, 0, 1, 0, 1],
-    [1, 1, 1, 0, 1, 0, 0, 1],
-    [1, 0, 0, 0, 0, 0, 0, 1],
-    [1, 1, 1, 1, 1, 1, 1, 1],
-]
-
-DIR_VECTORS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
-DIR_NAMES = ['N', 'E', 'S', 'W']
-
-STATE_TOWN = 0
-STATE_TOWN_SUB = 1
-STATE_DUNGEON = 2
-STATE_BATTLE_CMD = 3
-STATE_BATTLE_MSG = 4
-STATE_BATTLE_END = 5
-STATE_INVENTORY = 6
-STATE_INV_ACTION = 7
-STATE_SHOP = 8
-STATE_BATTLE_NPC_CMD = 9
-STATE_GUILD = 10
-STATE_STAT_ALLOC = 11
-STATE_BATTLE_TARGET_PART = 12
-STATE_REVIVE = 13
-STATE_INV_GIVE_NPC = 14
-STATE_HOME = 15
-STATE_ENDING = 16
-STATE_DUNGEON_SKILL = 17
-STATE_DUNGEON_SHOP = 18
-STATE_TITLE = 19
-STATE_JOB_SELECT = 20
-
-SAVE_FILE = "delvoker_save.json"
-
-INV_MAX = 8
-SHOP_KEYS = ["short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
-             "herb", "potion", "ether", "antidote", "scroll_mapping",
-             "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return"]
-MERCHANT_KEYS = ["elixir", "potion", "ether", "antidote", "holy_scroll", "grimoire_heal"]
-PROMOTION_COST = 1000
-DROP_RATE = 0.35
-
 # Tier-based drop pools keyed by floor range (1-indexed upper bound inclusive)
 _DROP_TIERS = [
-    (3,  ["old_dagger", "short_sword", "staff"],              ["leather_armor", "herb", "potion"]),
-    (6,  ["long_sword", "chain_mail"],                        ["potion", "ether", "grimoire_ice"]),
-    (10, ["steel_sword", "mithril_sword", "steel_plate"],     ["ether", "grimoire_poison"]),
+    (3,  ["old_dagger", "short_sword", "staff"],          ["leather_armor", "herb", "potion"]),
+    (6,  ["long_sword", "chain_mail"],                    ["potion", "ether", "grimoire_ice"]),
+    (10, ["steel_sword", "mithril_sword", "steel_plate"], ["ether", "grimoire_poison"]),
 ]
 
+
 def _drop_pools(floor):
-    """Return (weapon_pool, item_pool) for the given dungeon floor."""
     for cap, wp, ip in _DROP_TIERS:
         if floor <= cap:
             return wp, ip
     return _DROP_TIERS[-1][1], _DROP_TIERS[-1][2]
+
 
 # Tier-based random encounter pools
 _ENCOUNTER_TIERS = [
@@ -119,36 +59,13 @@ _ENCOUNTER_TIERS = [
     (10, ["golem", "wyvern", "wraith"]),
 ]
 
+
 def _encounter_pool(floor):
     for cap, pool in _ENCOUNTER_TIERS:
         if floor <= cap:
             return pool
     return _ENCOUNTER_TIERS[-1][1]
 
-ENCOUNTER_RATE = 0.15
-FLEE_RATE = 0.5
-COMMANDS = ["Fight", "Flee"]
-TOWN_MENU = ["Inn", "Guild", "Shop", "Stats", "Revive", "Home", "Enter Dungeon"]
-
-STAT_ALLOC_NAMES = ["STR", "DEF", "AGI", "MAG"]
-STAT_ALLOC_ATTRS = ["str_", "def_", "agi", "mag"]
-
-HOME_MENU = ["Warehouse", "Renovate", "Training", "Back"]
-HOME_TRAIN_STATS = ["STR", "DEF", "MAG"]
-HOME_TRAIN_ATTRS = ["str", "def", "mag"]
-HOME_RENOVATE_COSTS = [500, 1000, 2000, 4000, 8000]
-HOME_RENOVATE_SLOTS = 5
-
-# BGM zone mapping: state → music index (0=town, 1=dungeon, 2=battle, -1=stop)
-_BGM_ZONES = {
-    STATE_TITLE: 0, STATE_JOB_SELECT: 0,
-    STATE_TOWN: 0, STATE_TOWN_SUB: 0, STATE_GUILD: 0,
-    STATE_STAT_ALLOC: 0, STATE_SHOP: 0, STATE_HOME: 0, STATE_REVIVE: 0,
-    STATE_DUNGEON: 1, STATE_DUNGEON_SKILL: 1, STATE_DUNGEON_SHOP: 1,
-    STATE_BATTLE_CMD: 2, STATE_BATTLE_MSG: 2, STATE_BATTLE_END: 2,
-    STATE_BATTLE_NPC_CMD: 2, STATE_BATTLE_TARGET_PART: 2,
-    STATE_ENDING: -1,
-}
 
 # Global dungeon map (set by _enter_dungeon_fresh / _next_floor)
 _dungeon_map = None
@@ -303,7 +220,7 @@ class App:
         self.msg_colors = []
 
         # UI Windows
-        self.town_win = Window(8,  30, 240, 100, title="- DELVOKER -")
+        self.town_win = Window(8,  10, 240, 125, title="- DELVOKER -")
         self.status_win = Window(8, 143, 240,  72)
         self.sub_win = Window(10, 62, 236, 120)
         self.battle_win = Window(2, 150, SCREEN_W - 4, 88)
@@ -1627,90 +1544,20 @@ class App:
 
     # ---- Persistence ----
 
-    @staticmethod
-    def _serialize_item(item):
-        if isinstance(item, EnchantedWeapon):
-            prefix = item.prefix
-            return {"kind": "enchanted_weapon",
-                    "base_name": item._base_name,
-                    "base_dc": item.dice_count - (prefix["dice_count_mod"] if prefix else 0),
-                    "base_ds": item.dice_sides - (prefix["dice_sides_mod"] if prefix else 0),
-                    "base_sb": item.static_bonus - (prefix["static_bonus_mod"] if prefix else 0),
-                    "enchant_bonus": item.enchant_bonus, "value": item.value,
-                    "prefix": prefix, "suffix": item.suffix}
-        if isinstance(item, WeaponItem):
-            return {"kind": "weapon",
-                    "name": item.name, "dice_count": item.dice_count,
-                    "dice_sides": item.dice_sides, "static_bonus": item.static_bonus,
-                    "enchant_bonus": item.enchant_bonus, "value": item.value,
-                    "attribute": item.attribute}
-        if isinstance(item, EnchantedArmor):
-            prefix = item.prefix
-            return {"kind": "enchanted_armor",
-                    "base_name": item._base_name,
-                    "base_def": item.def_bonus - (prefix["def_bonus_mod"] if prefix else 0),
-                    "value": item.value, "prefix": prefix, "suffix": item.suffix}
-        if isinstance(item, ArmorItem):
-            return {"kind": "armor",
-                    "name": item.name, "def_bonus": item.def_bonus, "value": item.value}
-        if isinstance(item, GrimoireItem):
-            return {"kind": "grimoire",
-                    "name": item.name, "skill_name": item.skill_name,
-                    "mp_cost": item.mp_cost, "effect_type": item.effect_type,
-                    "power": item.power, "value": item.value, "is_utility": item.is_utility}
-        return {"kind": "consumable",
-                "name": item.name, "hp_restore": getattr(item, "hp_restore", 0),
-                "mp_restore": getattr(item, "mp_restore", 0), "value": item.value,
-                "cure_status": getattr(item, "cure_status", "")}
-
-    @staticmethod
-    def _deserialize_item(d):
-        k = d.get("kind", "consumable")
-        if k == "enchanted_weapon":
-            base = WeaponItem(d["base_name"], d["base_dc"], d["base_ds"],
-                              d.get("base_sb", 0), d.get("enchant_bonus", 0), d.get("value", 0))
-            return EnchantedWeapon(base, d.get("prefix"), d.get("suffix"))
-        if k == "weapon":
-            return WeaponItem(d["name"], d["dice_count"], d["dice_sides"],
-                              d.get("static_bonus", 0), d.get("enchant_bonus", 0),
-                              d.get("value", 0), d.get("attribute"))
-        if k == "enchanted_armor":
-            base = ArmorItem(d["base_name"], d["base_def"], d.get("value", 0))
-            return EnchantedArmor(base, d.get("prefix"), d.get("suffix"))
-        if k == "armor":
-            return ArmorItem(d["name"], d["def_bonus"], d.get("value", 0))
-        if k == "grimoire":
-            return GrimoireItem(d["name"], d["skill_name"], d.get("mp_cost", 5),
-                                d.get("effect_type", "attack"), d.get("power", 10),
-                                d.get("value", 0), d.get("is_utility", False))
-        return ConsumableItem(d["name"], d.get("hp_restore", 0), d.get("mp_restore", 0),
-                              d.get("value", 0), d.get("cure_status", ""))
-
     def save_data(self):
-        data = {
-            "gold": self.player.gold,
-            "warehouse": [self._serialize_item(it) for it in self.player.warehouse],
-            "warehouse_max": self.player.warehouse_max,
-            "perm_stats": dict(self.player.perm_stats),
-            "unlocked_jobs": list(self.unlocked_jobs),
-            "game_cleared": self.game_cleared,
-        }
-        with open(SAVE_FILE, "w", encoding="ascii") as f:
-            json.dump(data, f, ensure_ascii=True)
+        save_game(self.player, self.unlocked_jobs, self.game_cleared)
 
     def load_data(self):
-        try:
-            with open(SAVE_FILE, encoding="ascii") as f:
-                data = json.load(f)
-            self.player.gold = data.get("gold", 0)
-            self.player.warehouse = [self._deserialize_item(d)
-                                     for d in data.get("warehouse", [])]
-            self.player.warehouse_max = data.get("warehouse_max", 10)
-            self.player.perm_stats = data.get("perm_stats", {"str": 0, "def": 0, "mag": 0})
-            self.unlocked_jobs = data.get("unlocked_jobs", ["warrior"])
-            self.game_cleared = data.get("game_cleared", False)
-        except (FileNotFoundError, json.JSONDecodeError, KeyError):
-            pass
+        data = load_game()
+        if not data:
+            return
+        self.player.gold = data.get("gold", 0)
+        self.player.warehouse = [deserialize_item(d)
+                                 for d in data.get("warehouse", [])]
+        self.player.warehouse_max = data.get("warehouse_max", 10)
+        self.player.perm_stats = data.get("perm_stats", {"str": 0, "def": 0, "mag": 0})
+        self.unlocked_jobs = data.get("unlocked_jobs", ["warrior"])
+        self.game_cleared = data.get("game_cleared", False)
 
     # ---- Shop logic ----
 
@@ -2270,47 +2117,7 @@ class App:
         self.sub_win.draw(_content)
 
     def draw_3d_view(self):
-        for d in range(MAX_DEPTH - 1, -1, -1):
-            fx1, fy1, fx2, fy2 = FRAMES[d]
-            nfx1, nfy1, nfx2, nfy2 = FRAMES[d + 1]
-            wc = WALL_COLS[d] if d < len(WALL_COLS) else COL_DARK_GRAY
-            pyxel.tri(fx1, fy1, fx2,  fy1, nfx2, nfy1, wc)
-            pyxel.tri(fx1, fy1, nfx1, nfy1, nfx2, nfy1, wc)
-            pyxel.tri(fx1, fy2, fx2,  fy2, nfx2, nfy2, wc)
-            pyxel.tri(fx1, fy2, nfx1, nfy2, nfx2, nfy2, wc)
-
-        nfx1, nfy1, nfx2, nfy2 = FRAMES[MAX_DEPTH]
-        pyxel.rect(nfx1, nfy1, nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, COL_NAVY)
-
-        visible = MAX_DEPTH
-        for d in range(MAX_DEPTH):
-            if self.wall_at(d + 1, 0):
-                visible = d + 1
-                break
-
-        for d in range(visible - 1, -1, -1):
-            fx1, fy1, fx2, fy2 = FRAMES[d]
-            nfx1, nfy1, nfx2, nfy2 = FRAMES[d + 1]
-            front = self.wall_at(d + 1, 0)
-            left = self.wall_at(d, -1)
-            right = self.wall_at(d, 1)
-            wc = WALL_COLS[d] if d < len(WALL_COLS) else COL_DARK_GRAY
-            if front:
-                pyxel.rect(nfx1, nfy1, nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, wc)
-            if left:
-                pyxel.tri(fx1, fy1, nfx1, nfy1, nfx1, nfy2, wc)
-                pyxel.tri(fx1, fy1, fx1,  fy2,  nfx1, nfy2, wc)
-            if right:
-                pyxel.tri(nfx2, nfy1, fx2, fy1, fx2,  fy2,  wc)
-                pyxel.tri(nfx2, nfy1, nfx2, nfy2, fx2, fy2, wc)
-            if d < MAX_DEPTH - 1:
-                if front:
-                    pyxel.rectb(nfx1, nfy1, nfx2 - nfx1 + 1,
-                                nfy2 - nfy1 + 1, COL_DARK_GRAY)
-                pyxel.line(fx1, fy1, nfx1, nfy1, COL_DARK_GRAY)
-                pyxel.line(fx2, fy1, nfx2, nfy1, COL_DARK_GRAY)
-                pyxel.line(fx1, fy2, nfx1, nfy2, COL_DARK_GRAY)
-                pyxel.line(fx2, fy2, nfx2, nfy2, COL_DARK_GRAY)
+        _draw_3d_view(self.wall_at)
 
     def draw_npcs(self):
         for npc in self.npcs:
