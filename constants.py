@@ -98,12 +98,16 @@ SAVE_FILE = "delvoker_save.json"
 INV_MAX       = 12
 SHOP_KEYS     = [
     "short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
+    "steel_sword", "mithril_sword", "steel_plate",
     "herb", "potion", "ether", "antidote", "scroll_mapping",
     "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return",
     "lucky_ring", "mana_charm", "rabbits_foot", "emergency_kit",
 ]
 MERCHANT_KEYS  = ["elixir", "potion", "ether", "antidote", "holy_scroll", "grimoire_heal"]
 SHOP_COMMANDS  = ["Buy", "Sell"]
+SHOP_STOCK_SIZE = 15
+SHOP_RESTOCK_STEPS = 100
+SHOP_RARE_SLOT_RATE = 0.08
 
 # Battle / progression
 PROMOTION_COST = 1000

@@ -19,6 +19,7 @@ from constants import (
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
     TILE_FOUNTAIN, TILE_MERCHANT,
     SAVE_FILE, INV_MAX, SHOP_KEYS, MERCHANT_KEYS, SHOP_COMMANDS,
+    SHOP_STOCK_SIZE, SHOP_RESTOCK_STEPS, SHOP_RARE_SLOT_RATE,
     PROMOTION_COST, DROP_RATE, ENCOUNTER_RATE, FLEE_RATE, COMMANDS,
     TOWN_MENU, STAT_ALLOC_NAMES, STAT_ALLOC_ATTRS,
     HOME_MENU, HOME_TRAIN_STATS, HOME_TRAIN_ATTRS,
@@ -42,6 +43,18 @@ _DROP_TIERS = [
     (3,  ["old_dagger", "short_sword", "staff"],          ["leather_armor", "herb", "potion"]),
     (6,  ["long_sword", "chain_mail"],                    ["potion", "ether", "grimoire_ice"]),
     (10, ["steel_sword", "mithril_sword", "steel_plate"], ["ether", "grimoire_poison"]),
+]
+
+_SHOP_TIERS = [
+    ["short_sword", "staff", "leather_armor", "herb", "potion",
+     "antidote", "scroll_mapping", "grimoire_fire", "grimoire_heal",
+     "lucky_ring", "emergency_kit"],
+    ["long_sword", "chain_mail", "potion", "ether", "antidote",
+     "scroll_mapping", "grimoire_heal", "grimoire_ice", "mana_charm",
+     "emergency_kit"],
+    ["steel_sword", "mithril_sword", "steel_plate", "potion", "ether",
+     "antidote", "grimoire_ice", "grimoire_poison", "grimoire_return",
+     "rabbits_foot", "emergency_kit"],
 ]
 
 
@@ -193,6 +206,8 @@ class App:
         # Shop state
         self.shop_idx  = 0
         self.shop_mode = "buy"
+        self.shop_stock = []
+        self.steps_to_restock = SHOP_RESTOCK_STEPS
 
         # Guild state
         self.guild_idx = 0
@@ -274,6 +289,7 @@ class App:
         self.shop_win = Window(8,  10, 240, 230, title="- SHOP -")
 
         self.state = None
+        self._restock_shop(force=True)
         self._init_audio()
         self._set_state(STATE_TITLE)
 
@@ -284,6 +300,87 @@ class App:
     def add_popup(self, text, x, y, color):
         self.popups.append({"text": text, "x": x, "y": y,
                            "color": color, "timer": 20})
+
+    def _item_label(self, item):
+        return item.label() if hasattr(item, "label") else item.name
+
+    def _item_color(self, item, selected=False, enabled=True):
+        if not enabled:
+            return COL_DARK_GRAY
+        rarity = getattr(item, "rarity", "normal")
+        if rarity == "genesis":
+            return COL_WHITE if (pyxel.frame_count // 10) % 2 == 0 else COL_BLUE
+        if rarity == "legend":
+            return COL_ORANGE
+        if rarity == "epic":
+            return COL_PEACH
+        if rarity == "rare":
+            return COL_YELLOW
+        if getattr(item, "is_cursed", False):
+            return COL_DARK_PURPLE
+        return COL_YELLOW if selected else COL_WHITE
+
+    def _shop_tier_index(self, floor=None):
+        floor = self.dungeon_floor if floor is None else floor
+        if floor <= 3:
+            return 0
+        if floor <= 6:
+            return 1
+        return 2
+
+    def _shop_tier_keys(self, tier_idx=None):
+        tier_idx = self._shop_tier_index() if tier_idx is None else tier_idx
+        keys = []
+        for idx in range(0, min(tier_idx, len(_SHOP_TIERS) - 1) + 1):
+            keys.extend(_SHOP_TIERS[idx])
+        valid = [k for k in keys if k in SHOP_KEYS and k in ITEM_CATALOG]
+        return list(dict.fromkeys(valid))
+
+    def _make_shop_item(self, key, enchanted=False):
+        item = ITEM_CATALOG[key]
+        if enchanted and item.kind == "weapon":
+            return make_enchanted_weapon(key)
+        if enchanted and item.kind == "armor":
+            return make_enchanted_armor(key)
+        return item.clone()
+
+    def _make_rare_shop_item(self):
+        tier = self._shop_tier_index()
+        upper_keys = self._shop_tier_keys(min(tier + 1, len(_SHOP_TIERS) - 1))
+        upper_keys = [k for k in upper_keys if k not in self._shop_tier_keys(tier)]
+        gear_keys = [k for k in self._shop_tier_keys(min(tier + 1, len(_SHOP_TIERS) - 1))
+                     if ITEM_CATALOG[k].kind in ("weapon", "armor")]
+        if upper_keys and random.random() < 0.5:
+            return self._make_shop_item(random.choice(upper_keys))
+        for _ in range(8):
+            key = random.choice(gear_keys or self._shop_tier_keys())
+            item = self._make_shop_item(key, enchanted=True)
+            if getattr(item, "rarity", "normal") != "normal":
+                return item
+        return self._make_shop_item(random.choice(gear_keys or self._shop_tier_keys()), enchanted=True)
+
+    def _restock_shop(self, force=False):
+        keys = self._shop_tier_keys()
+        if not keys:
+            self.shop_stock = []
+            self.steps_to_restock = SHOP_RESTOCK_STEPS
+            return
+        if len(keys) >= SHOP_STOCK_SIZE:
+            chosen = random.sample(keys, SHOP_STOCK_SIZE)
+        else:
+            chosen = list(keys)
+            while len(chosen) < SHOP_STOCK_SIZE:
+                chosen.append(random.choice(keys))
+        self.shop_stock = [self._make_shop_item(k) for k in chosen]
+        if self.shop_stock and random.random() < SHOP_RARE_SLOT_RATE:
+            self.shop_stock[random.randrange(len(self.shop_stock))] = self._make_rare_shop_item()
+        self.shop_idx = min(self.shop_idx, max(0, len(self.shop_stock) - 1))
+        self.steps_to_restock = SHOP_RESTOCK_STEPS
+
+    def _tick_shop_restock(self):
+        self.steps_to_restock -= 1
+        if self.steps_to_restock <= 0:
+            self._restock_shop()
 
     def _init_audio(self):
         # SE 0: attack (noise burst)
@@ -438,6 +535,7 @@ class App:
         self.py = _dungeon_map.start_y
         _dungeon_map.visit(self.px, self.py)
         self._spawn_dungeon_npcs()
+        self._restock_shop(force=True)
 
     def _spawn_dungeon_npcs(self):
         floor_tiles = [
@@ -1291,6 +1389,7 @@ class App:
             if _dungeon_map is not None:
                 _dungeon_map.visit(self.px, self.py)
             self.steps_since_encounter += 1
+            self._tick_shop_restock()
             tile = _dungeon_map.tile_at(
                 self.px, self.py) if _dungeon_map else 0
             if tile == TILE_STAIRS:
@@ -1889,14 +1988,18 @@ class App:
             self.shop_idx = 0
             return
         if self.shop_mode == "buy":
+            if not self.shop_stock:
+                self._restock_shop(force=True)
+            if not self.shop_stock:
+                return
             if pyxel.btnp(pyxel.KEY_UP):
-                self.shop_idx = (self.shop_idx - 1) % len(SHOP_KEYS)
+                self.shop_idx = (self.shop_idx - 1) % len(self.shop_stock)
             if pyxel.btnp(pyxel.KEY_DOWN):
-                self.shop_idx = (self.shop_idx + 1) % len(SHOP_KEYS)
+                self.shop_idx = (self.shop_idx + 1) % len(self.shop_stock)
             if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
                 if len(self.player.inventory) >= INV_MAX:
                     return
-                item = ITEM_CATALOG[SHOP_KEYS[self.shop_idx]]
+                item = self.shop_stock[self.shop_idx]
                 if self.player.gold >= item.value:
                     self.player.gold -= item.value
                     self.player.inventory.append(item.clone())
@@ -1911,7 +2014,7 @@ class App:
                 self.shop_idx = (self.shop_idx + 1) % len(inv)
             if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
                 item = inv[self.shop_idx]
-                if item is self.player.weapon or item is self.player.armor:
+                if item is self.player.weapon or item is self.player.armor or item is self.player.accessory:
                     return
                 sell_price = int(item.value * 0.3)
                 self.player.gold += sell_price
@@ -2265,22 +2368,11 @@ class App:
             else:
                 for i, item in enumerate(inv):
                     cursor = ">" if i == self.inv_idx else " "
-                    eq = item is self.player.weapon or item is self.player.armor
+                    eq = item is self.player.weapon or item is self.player.armor or item is self.player.accessory
                     tag = {"weapon": "W", "armor": "A",
-                           "consumable": "C"}.get(item.kind, "?")
-                    if eq:
-                        name_col = COL_GREEN
-                    elif isinstance(item, EnchantedWeapon):
-                        name_col = {
-                            "cursed": COL_DARK_PURPLE,
-                            "rare":   COL_ORANGE,
-                            "magic":  COL_YELLOW,
-                        }.get(item.rarity, COL_WHITE)
-                    elif isinstance(item, EnchantedArmor):
-                        name_col = COL_YELLOW if item.rarity == "magic" else COL_WHITE
-                    else:
-                        name_col = COL_WHITE
-                    display = item.label() if hasattr(item, "label") else item.name
+                           "consumable": "C", "accessory": "Acc"}.get(item.kind, "?")
+                    name_col = COL_GREEN if eq else self._item_color(item)
+                    display = self._item_label(item)
                     pyxel.text(cx,           cy + i * 14,
                                f"{cursor} {display}", name_col)
                     pyxel.text(cx + cw - 12, cy + i * 14,
@@ -2547,32 +2639,41 @@ class App:
 
             p = self.player
             if self.shop_mode == "buy":
-                for i, key in enumerate(SHOP_KEYS):
-                    item = ITEM_CATALOG[key]
-                    col = COL_YELLOW if i == self.shop_idx else COL_WHITE
-                    cursor = ">" if i == self.shop_idx else " "
+                if not self.shop_stock:
+                    pyxel.text(cx, row_y, "-- No Stock --", COL_DARK_GRAY)
+                for i, item in enumerate(self.shop_stock[:SHOP_STOCK_SIZE]):
+                    col_i = i % 3
+                    row_i = i // 3
+                    cell_x = cx + col_i * 76
+                    cell_y = row_y + row_i * 24
+                    selected = i == self.shop_idx
+                    border_col = COL_YELLOW if selected else COL_DARK_GRAY
                     affordable = p.gold >= item.value
-                    name_col = col if affordable else COL_DARK_GRAY
-                    pyxel.text(cx,           row_y + i * 10,
-                               f"{cursor} {item.name[:18]}", name_col)
-                    pyxel.text(cx + cw - 42, row_y + i * 10, f"{item.value}G",
+                    name_col = self._item_color(item, selected, affordable)
+                    pyxel.rectb(cell_x, cell_y, 72, 21, border_col)
+                    cursor = ">" if selected else " "
+                    pyxel.text(cell_x + 2, cell_y + 3,
+                               f"{cursor}{self._item_label(item)[:14]}", name_col)
+                    pyxel.text(cell_x + 2, cell_y + 12, f"{item.value}G",
                                COL_YELLOW if affordable else COL_DARK_GRAY)
                 if len(p.inventory) >= INV_MAX:
                     pyxel.text(cx + 60, cy + ch - 16, "Bag Full!", COL_RED)
-                pyxel.text(cx, cy + ch - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
+                pyxel.text(cx + 118, cy + ch - 16,
+                           f"Restock:{self.steps_to_restock}", COL_LIGHT_GRAY)
+                pyxel.text(cx, cy + ch - 8, "Z:Buy  X:Back  <>:Switch", COL_DARK_GRAY)
             else:
                 inv = p.inventory
                 if not inv:
                     pyxel.text(cx, row_y, "-- Empty --", COL_DARK_GRAY)
                 else:
                     for i, item in enumerate(inv):
-                        equipped = (item is p.weapon or item is p.armor)
-                        col = COL_DARK_GRAY if equipped else (COL_YELLOW if i == self.shop_idx else COL_WHITE)
+                        equipped = (item is p.weapon or item is p.armor or item is p.accessory)
+                        col = self._item_color(item, i == self.shop_idx, not equipped)
                         cursor = ">" if i == self.shop_idx else " "
                         sell_price = int(item.value * 0.3)
                         tag = "[E]" if equipped else f"{sell_price}G"
                         pyxel.text(cx,           row_y + i * 10,
-                                   f"{cursor} {item.name[:16]}", col)
+                                   f"{cursor} {self._item_label(item)[:16]}", col)
                         pyxel.text(cx + cw - 42, row_y + i * 10, tag, col)
                 pyxel.text(cx, cy + ch - 8, "Z:Sell  X:Back", COL_DARK_GRAY)
 
@@ -2672,32 +2773,63 @@ class App:
                     col = COL_DARK_GRAY
                 pyxel.pset(ox + tx, oy + ty, col)
 
+    def _draw_stat_bar(self, x, y, w, value, max_value, col):
+        pyxel.rect(x, y, w, 3, COL_DARK_GRAY)
+        fill = 0 if max_value <= 0 else int(w * max(0, value) / max_value)
+        pyxel.rect(x, y, min(w, fill), 3, col)
+
+    def _short_item_name(self, item, limit):
+        if not item:
+            return "None"
+        return self._item_label(item).replace(" ", "")[:limit]
+
+    def _draw_party_card(self, member, x, y, w, h, role, border_col):
+        pyxel.rect(x, y, w, h, COL_BLACK)
+        pyxel.rectb(x, y, w, h, border_col)
+        if member is None:
+            pyxel.text(x + 8, y + 24, "-- Empty --", COL_DARK_GRAY)
+            return
+        hp_rate = member.hp / member.max_hp if member.max_hp > 0 else 0
+        hp_col = COL_GREEN if hp_rate > 0.4 else (COL_ORANGE if hp_rate > 0.2 else COL_RED)
+        name = member.name[:8]
+        pyxel.text(x + 3, y + 3, name, COL_WHITE)
+        pyxel.text(x + w - len(role) * 4 - 3, y + 3, role, border_col)
+        pyxel.text(x + 3, y + 13, f"HP {member.hp}/{member.max_hp}", hp_col)
+        self._draw_stat_bar(x + 3, y + 22, w - 6, member.hp, member.max_hp, hp_col)
+        max_mp = getattr(member, "total_max_mp", member.max_mp)
+        pyxel.text(x + 3, y + 27, f"MP {member.mp}/{max_mp}", COL_BLUE)
+        self._draw_stat_bar(x + 3, y + 36, w - 6, member.mp, max_mp, COL_BLUE)
+        wp = self._short_item_name(getattr(member, "weapon", None), 9)
+        ar = self._short_item_name(getattr(member, "armor", None), 9)
+        pyxel.text(x + 3, y + 41, f"W:{wp}", COL_PEACH)
+        pyxel.text(x + 3, y + 50, f"A:{ar}", COL_PEACH)
+        icon_x = x + w - 30
+        if member.status_effects.get("poison", 0) > 0:
+            pyxel.text(icon_x, y + 50, "[P]", COL_GREEN)
+            icon_x += 13
+        if member.status_effects.get("stun", 0) > 0:
+            pyxel.text(icon_x, y + 50, "[S]", COL_YELLOW)
+
     def draw_status(self):
         pyxel.rect(0, STATUS_Y, SCREEN_W, SCREEN_H - STATUS_Y, COL_BLACK)
         pyxel.line(0, STATUS_Y, SCREEN_W - 1, STATUS_Y, COL_DARK_GRAY)
-        p = self.player
-        pyxel.text(4, STATUS_Y + 4,
-                   f"{p.name}  Lv{p.level} {p.job.name}  HP:{p.hp}/{p.max_hp}",
-                   COL_WHITE)
-        gold_str = f"Gold:{p.gold}G"
-        pyxel.text(SCREEN_W - 4 - len(gold_str) * 4,
-                   STATUS_Y + 4, gold_str, COL_YELLOW)
-        status_info = f"EXP:{p.exp}/{p.exp_to_next}"
-        if p.bonus_points > 0:
-            status_info += f"  BP:{p.bonus_points}"
-        pyxel.text(4, STATUS_Y + 16, status_info, COL_YELLOW)
-        pyxel.text(4, STATUS_Y + 28,
-                   f"({self.px},{self.py}) {DIR_NAMES[self.dir]}",
-                   COL_LIGHT_GRAY)
-        floor_str = f"B{self.dungeon_floor}F"
-        pyxel.text(SCREEN_W - 4 - len(floor_str) * 4,
-                   STATUS_Y + 28, floor_str, COL_YELLOW)
-        wp_name  = p.weapon.label()[:16]    if p.weapon    else "None"
-        ar_name  = p.armor.label()[:16]     if p.armor     else "None"
-        acc_name = p.accessory.label()[:12] if p.accessory else "None"
-        pyxel.text(4, STATUS_Y + 40, f"W:{wp_name}  A:{ar_name}", COL_PEACH)
-        pyxel.text(4, STATUS_Y + 52, f"Acc:{acc_name}", COL_PEACH)
-        pyxel.text(4, STATUS_Y + 64,
+        card_y = STATUS_Y + 2
+        card_h = 60
+        card_w = SCREEN_W // 3
+        members = self.party.members[:3]
+        while len(members) < 3:
+            members.append(None)
+        for i, member in enumerate(members):
+            x = i * card_w
+            w = card_w if i < 2 else SCREEN_W - x
+            role = "[REAR]" if i == 0 else "[FRONT]"
+            border = COL_PEACH if i == 0 else COL_LIGHT_GRAY
+            self._draw_party_card(member, x + 1, card_y, w - 2, card_h, role, border)
+        meta = f"B{self.dungeon_floor}F ({self.px},{self.py}) {DIR_NAMES[self.dir]}  Gold:{self.player.gold}G"
+        if self.player.bonus_points > 0:
+            meta += f" BP:{self.player.bonus_points}"
+        pyxel.text(4, STATUS_Y + 64, meta[:62], COL_YELLOW)
+        pyxel.text(4, STATUS_Y + 72,
                    "Arrow:Move  T:Town  I:Item  S:Skill  Q:Quit", COL_DARK_GRAY)
 
 
