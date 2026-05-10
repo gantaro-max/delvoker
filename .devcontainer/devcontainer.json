@@ -10,6 +10,7 @@
         "ms-python.vscode-pylance",
         "anthropic.claude-code",
         "google.geminicodeassist",
+        "openai.chatgpt",
         "tamasfe.even-better-toml",
         "GitHub.vscode-pull-request-github",
         "eamodio.gitlens"
