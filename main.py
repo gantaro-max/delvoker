@@ -152,18 +152,21 @@ class Effect:
 class App:
     def __init__(self):
         pyxel.init(SCREEN_W, SCREEN_H, title=TITLE, fps=FPS)
+        self.sprite_debug_logged = set()
+        asset_path = Path(__file__).with_name("assets.pyxres")
         try:
-            pyxel.load("assets.pyxres")
+            pyxel.load(str(asset_path))
             self.assets_loaded = True
-        except Exception:
+        except Exception as e:
             self.assets_loaded = False
+            print(f"[WARN] assets.pyxres load failed: {e}")
         self.px = 1
         self.py = 1
         self.dir = 1
 
         self.player = Player()
 
-        # Party (player + up to 2 NPC members)
+        # Party (player + up to 3 NPC members)
         self.party = Party(self.player)
         demo_npc = NPCMember("warrior", "Gard", "reckless")
         self.party.add(demo_npc)
@@ -1736,7 +1739,7 @@ class App:
             idx = self.party.members.index(target)
         except ValueError:
             idx = 0
-        card_w = SCREEN_W // 3
+        card_w = SCREEN_W // Party.MAX_SIZE
         x = idx * card_w + card_w // 2 - 8
         return x, STATUS_Y + 12
 
@@ -2233,17 +2236,53 @@ class App:
         return [(COL_GREEN, COL_RED), (COL_DARK_GREEN, COL_DARK_PURPLE),
                 (COL_BLUE, COL_ORANGE)]
 
+    def _sprite_warn_once(self, key, message):
+        if key in self.sprite_debug_logged:
+            return
+        self.sprite_debug_logged.add(key)
+        print(f"[WARN] {message}")
+
+    def _draw_enemy_fallback(self, enemy, x, y, reason="fallback"):
+        key = getattr(enemy, "enemy_key", getattr(enemy, "name", "enemy"))
+        log_key = (key, reason)
+        if reason:
+            self._sprite_warn_once(
+                log_key,
+                f"enemy sprite {reason}: key={key} "
+                f"u={getattr(enemy, 'sprite_u', None)} "
+                f"v={getattr(enemy, 'sprite_v', None)} x={x} y={y} "
+                f"assets_loaded={self.assets_loaded}"
+            )
+        rect_col = COL_DARK_GRAY if enemy.hp <= 0 else COL_RED
+        pyxel.rect(x, y, 32, 32, rect_col)
+        pyxel.rectb(x, y, 32, 32, COL_WHITE)
+        label = getattr(enemy, "name", "?")[:1].upper()
+        pyxel.text(x + 14, y + 13, label, COL_WHITE)
+
     def _draw_enemy_sprite(self, enemy, x, y):
         if not self.assets_loaded:
+            self._draw_enemy_fallback(enemy, x, y, "assets_not_loaded")
             return False
-        for orig, new in self._enemy_palette_swaps(enemy):
-            pyxel.pal(orig, new)
-        if enemy.flip_x:
-            pyxel.blt(x + 32, y, 0, enemy.sprite_u, enemy.sprite_v, -32, 32, 0)
-        else:
-            pyxel.blt(x, y, 0, enemy.sprite_u, enemy.sprite_v, 32, 32, 0)
-        pyxel.pal()
-        return True
+        sprite_u = getattr(enemy, "sprite_u", None)
+        sprite_v = getattr(enemy, "sprite_v", None)
+        if sprite_u is None or sprite_v is None or sprite_u < 0 or sprite_v < 0:
+            self._draw_enemy_fallback(enemy, x, y, "invalid_coords")
+            return False
+        try:
+            for orig, new in self._enemy_palette_swaps(enemy):
+                if 0 <= orig <= 15 and 0 <= new <= 15 and new != COL_BLACK:
+                    pyxel.pal(orig, new)
+            if enemy.flip_x:
+                pyxel.blt(x + 32, y, 0, sprite_u, sprite_v, -32, 32, 0)
+            else:
+                pyxel.blt(x, y, 0, sprite_u, sprite_v, 32, 32, 0)
+            return True
+        except Exception as e:
+            pyxel.pal()
+            self._draw_enemy_fallback(enemy, x, y, f"blt_failed:{e}")
+            return False
+        finally:
+            pyxel.pal()
 
     def _draw_battle(self):
         pyxel.cls(COL_BLACK)
@@ -2265,9 +2304,7 @@ class App:
             # Sprite / fallback rect
             sprite_x = cx - 16
             sprite_y = ey + (eh - 32) // 2
-            if not self._draw_enemy_sprite(enemy, sprite_x, sprite_y):
-                rect_col = COL_DARK_GRAY if enemy.hp <= 0 else COL_RED
-                pyxel.rect(cx - 16, ey, 32, 40, rect_col)
+            self._draw_enemy_sprite(enemy, sprite_x, sprite_y)
 
             # HP bar
             bar_w = min(80, slot_w - 4)
@@ -2304,12 +2341,14 @@ class App:
             pyxel.text(icon_x, 134, "[S]", COL_YELLOW)
 
         # NPC HP
+        npc_slot_w = 84
         for i, npc in enumerate(self.party.members[1:]):
             npc_col = COL_GREEN if npc.hp > npc.max_hp * \
                 0.4 else (COL_ORANGE if npc.hp > 0 else COL_RED)
-            pyxel.text(4 + i * 128, 142,
-                       f"{npc.name[:6]} HP:{npc.hp}/{npc.max_hp}", npc_col)
-            npc_icon_x = 4 + i * 128 + 80
+            npc_x = 4 + i * npc_slot_w
+            pyxel.text(npc_x, 142,
+                       f"{npc.name[:5]} HP:{npc.hp}/{npc.max_hp}", npc_col)
+            npc_icon_x = npc_x + 58
             if npc.status_effects.get("poison", 0) > 0:
                 pyxel.text(npc_icon_x, 142, "[P]", COL_GREEN)
                 npc_icon_x += 16
@@ -2490,18 +2529,19 @@ class App:
                 if not npc_members:
                     pyxel.text(cx, cy + 24, "No NPC in party.", COL_DARK_GRAY)
                 else:
+                    row_h = 24
                     for i, npc in enumerate(npc_members):
                         cursor = ">" if i == self.give_npc_idx else " "
                         col = COL_YELLOW if i == self.give_npc_idx else COL_WHITE
-                        pyxel.text(cx, cy + 24 + i * 28,
+                        pyxel.text(cx, cy + 24 + i * row_h,
                                    f"{cursor} {npc.name}", col)
                         npc_wp  = npc.weapon.name[:14]    if npc.weapon    else "None"
                         npc_ar  = npc.armor.name[:14]     if npc.armor     else "None"
                         npc_acc = getattr(npc, "accessory", None)
                         npc_acc = npc_acc.name[:12] if npc_acc else "None"
-                        pyxel.text(cx + 8, cy + 24 + i * 28 + 9,
+                        pyxel.text(cx + 8, cy + 24 + i * row_h + 8,
                                    f"W:{npc_wp}  A:{npc_ar}", COL_LIGHT_GRAY)
-                        pyxel.text(cx + 8, cy + 24 + i * 28 + 18,
+                        pyxel.text(cx + 8, cy + 24 + i * row_h + 16,
                                    f"Acc:{npc_acc}", COL_LIGHT_GRAY)
                 pyxel.text(cx, cy + ch - 8, "Z:Equip  X:Cancel", COL_DARK_GRAY)
             self.sub_win.draw(_npc_sel_content)
@@ -2904,11 +2944,12 @@ class App:
         pyxel.rect(x, y, w, h, COL_BLACK)
         pyxel.rectb(x, y, w, h, border_col)
         if member is None:
-            pyxel.text(x + 8, y + 24, "-- Empty --", COL_DARK_GRAY)
+            pyxel.text(x + 8, y + 24, "Empty", COL_DARK_GRAY)
             return
         hp_rate = member.hp / member.max_hp if member.max_hp > 0 else 0
         hp_col = COL_GREEN if hp_rate > 0.4 else (COL_ORANGE if hp_rate > 0.2 else COL_RED)
-        name = member.name[:8]
+        name_limit = max(4, (w - len(role) * 4 - 10) // 4)
+        name = member.name[:name_limit]
         pyxel.text(x + 3, y + 3, name, COL_WHITE)
         pyxel.text(x + w - len(role) * 4 - 3, y + 3, role, border_col)
         pyxel.text(x + 3, y + 13, f"HP {member.hp}/{member.max_hp}", hp_col)
@@ -2916,11 +2957,12 @@ class App:
         max_mp = getattr(member, "total_max_mp", member.max_mp)
         pyxel.text(x + 3, y + 27, f"MP {member.mp}/{max_mp}", COL_BLUE)
         self._draw_stat_bar(x + 3, y + 36, w - 6, member.mp, max_mp, COL_BLUE)
-        wp = self._short_item_name(getattr(member, "weapon", None), 9)
-        ar = self._short_item_name(getattr(member, "armor", None), 9)
+        equip_limit = max(3, min(6, (w - 8) // 8))
+        wp = self._short_item_name(getattr(member, "weapon", None), equip_limit)
+        ar = self._short_item_name(getattr(member, "armor", None), equip_limit)
         pyxel.text(x + 3, y + 41, f"W:{wp}", COL_PEACH)
         pyxel.text(x + 3, y + 50, f"A:{ar}", COL_PEACH)
-        icon_x = x + w - 30
+        icon_x = x + w - 28
         if member.status_effects.get("poison", 0) > 0:
             pyxel.text(icon_x, y + 50, "[P]", COL_GREEN)
             icon_x += 13
@@ -2932,13 +2974,14 @@ class App:
         pyxel.line(0, STATUS_Y, SCREEN_W - 1, STATUS_Y, COL_DARK_GRAY)
         card_y = STATUS_Y + 2
         card_h = 60
-        card_w = SCREEN_W // 3
-        members = self.party.members[:3]
-        while len(members) < 3:
+        card_count = Party.MAX_SIZE
+        card_w = SCREEN_W // card_count
+        members = self.party.members[:card_count]
+        while len(members) < card_count:
             members.append(None)
         for i, member in enumerate(members):
             x = i * card_w
-            w = card_w if i < 2 else SCREEN_W - x
+            w = card_w if i < card_count - 1 else SCREEN_W - x
             role = "[REAR]" if i == 0 else "[FRONT]"
             border = COL_PEACH if i == 0 else COL_LIGHT_GRAY
             self._draw_party_card(member, x + 1, card_y, w - 2, card_h, role, border)

@@ -541,9 +541,9 @@ class NPCMember(Status):
 
 
 class Party:
-    """プレイヤー1名 + 臨時NPC最大2名を管理するパーティクラス。"""
+    """プレイヤー1名 + 臨時NPC最大3名を管理するパーティクラス。"""
 
-    MAX_SIZE = 3
+    MAX_SIZE = 4
 
     def __init__(self, player):
         self.members = [player]
