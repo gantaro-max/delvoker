@@ -15,6 +15,7 @@ from constants import (
     STATE_BATTLE_TARGET_PART, STATE_BATTLE_TARGET, STATE_REVIVE, STATE_INV_GIVE_NPC,
     STATE_HOME, STATE_ENDING, STATE_DUNGEON_SKILL, STATE_DUNGEON_SHOP,
     STATE_TITLE, STATE_JOB_SELECT, STATE_BATTLE_SKILL, STATE_LOG_VIEW,
+    STATE_INV_TARGET_SELECT,
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
     TILE_FOUNTAIN, TILE_MERCHANT,
@@ -202,6 +203,8 @@ class App:
         self.inv_action_idx = 0
         self.inv_actions = []
         self.pre_inv_state = STATE_TOWN
+        self.inv_target_idx = 0
+        self.pending_use_item = None
 
         # Shop state
         self.shop_idx  = 0
@@ -439,6 +442,10 @@ class App:
         elif new_state == STATE_INV_ACTION:
             self.sub_win.close()
             self.inv_action_win.open()
+        elif new_state == STATE_INV_TARGET_SELECT:
+            self.inv_action_win.close()
+            self.sub_win.title = "Use Item"
+            self.sub_win.open()
         elif new_state == STATE_INV_GIVE_NPC:
             self.inv_action_win.close()
             self.sub_win.open()
@@ -678,11 +685,18 @@ class App:
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             sel = TOWN_MENU[self.town_cmd_idx]
             if sel == "Inn":
-                self.player.hp = self.player.max_hp
-                self.player.mp = self.player.max_mp
+                fallen = False
+                for member in self.party.members:
+                    if member.hp > 0:
+                        member.hp = member.max_hp
+                        member.mp = member.max_mp
+                    else:
+                        fallen = True
                 self.sub_win.title = "Inn"
                 self.town_sub_lines = ["Welcome! Rest well.",
-                                       "HP and MP fully restored."]
+                                       "The party's HP and MP are fully restored."]
+                if fallen:
+                    self.town_sub_lines.append("Fallen members need Revive.")
                 self._dialog_return_state = STATE_TOWN
                 self._set_state(STATE_TOWN_SUB)
             elif sel == "Guild":
@@ -1293,6 +1307,8 @@ class App:
             self._upd_inventory()
         elif self.state == STATE_INV_ACTION:
             self._upd_inv_action()
+        elif self.state == STATE_INV_TARGET_SELECT:
+            self._upd_inv_target_select()
         elif self.state == STATE_SHOP:
             self._upd_shop()
         elif self.state == STATE_GUILD:
@@ -1679,7 +1695,12 @@ class App:
             if sel == "Equip":
                 self._do_equip(item)
             elif sel == "Use":
-                if self._do_use(item):
+                if self._use_needs_target(item):
+                    self.pending_use_item = item
+                    self.inv_target_idx = 0
+                    self._set_state(STATE_INV_TARGET_SELECT)
+                    return
+                if self._do_use(item, self.player):
                     return
             elif sel == "Drop":
                 self.player.inventory.remove(item)
@@ -1690,6 +1711,59 @@ class App:
                 self.give_npc_idx = 0
                 self._set_state(STATE_INV_GIVE_NPC)
                 return
+            self._set_state(STATE_INVENTORY)
+
+    def _use_needs_target(self, item):
+        return (item.kind == "consumable"
+                and not isinstance(item, GrimoireItem)
+                and item.name != "Scroll: Mapping")
+
+    def _item_targets(self, item):
+        return list(self.party.members)
+
+    def _can_use_item_on(self, item, target):
+        if not target or target.hp <= 0:
+            return False
+        hp_ok = getattr(item, "hp_restore", 0) > 0 and target.hp < target.max_hp
+        max_mp = getattr(target, "max_mp", 0)
+        mp_ok = getattr(item, "mp_restore", 0) > 0 and target.mp < max_mp
+        cure = getattr(item, "cure_status", "")
+        cure_ok = bool(cure and target.status_effects.get(cure, 0) > 0)
+        return hp_ok or mp_ok or cure_ok
+
+    def _party_card_popup_pos(self, target):
+        try:
+            idx = self.party.members.index(target)
+        except ValueError:
+            idx = 0
+        card_w = SCREEN_W // 3
+        x = idx * card_w + card_w // 2 - 8
+        return x, STATUS_Y + 12
+
+    def _upd_inv_target_select(self):
+        item = self.pending_use_item
+        targets = self._item_targets(item) if item else []
+        if pyxel.btnp(pyxel.KEY_X):
+            self.pending_use_item = None
+            self._set_state(STATE_INV_ACTION)
+            return
+        if not item or not targets:
+            if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                self.pending_use_item = None
+                self._set_state(STATE_INVENTORY)
+            return
+        self.inv_target_idx = min(self.inv_target_idx, len(targets) - 1)
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.inv_target_idx = (self.inv_target_idx - 1) % len(targets)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.inv_target_idx = (self.inv_target_idx + 1) % len(targets)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            target = targets[self.inv_target_idx]
+            if not self._can_use_item_on(item, target):
+                self.sub_win.title = "Use Item"
+                return
+            self._do_use(item, target)
+            self.pending_use_item = None
             self._set_state(STATE_INVENTORY)
 
     def _do_equip(self, item):
@@ -1756,8 +1830,9 @@ class App:
             self.give_npc_item = None
             self._set_state(STATE_INVENTORY)
 
-    def _do_use(self, item):
+    def _do_use(self, item, target=None):
         p = self.player
+        target = target or p
         if item.name == "Scroll: Mapping":
             if _dungeon_map:
                 for vy in range(_dungeon_map.height):
@@ -1779,16 +1854,26 @@ class App:
                 p.skills.pop(0)
             p.skills.append(new_skill)
         else:
-            heal_hp = min(p.max_hp - p.hp, item.hp_restore)
-            p.hp = min(p.max_hp, p.hp + item.hp_restore)
-            p.mp = min(p.max_mp, p.mp + item.mp_restore)
+            if not self._can_use_item_on(item, target):
+                return False
+            heal_hp = min(target.max_hp - target.hp, item.hp_restore)
+            heal_mp = min(target.max_mp - target.mp, item.mp_restore)
+            target.hp = min(target.max_hp, target.hp + item.hp_restore)
+            target.mp = min(target.max_mp, target.mp + item.mp_restore)
+            played_se = False
             if heal_hp > 0:
-                self.add_popup(f"+{heal_hp}", 46, 130, COL_GREEN)
+                px, py = self._party_card_popup_pos(target)
+                self.add_popup(f"+{heal_hp}", px, py, COL_GREEN)
                 pyxel.play(2, 2)
+                played_se = True
+            if heal_mp > 0 and not played_se:
+                pyxel.play(2, 2)
+                played_se = True
             cure = getattr(item, "cure_status", "")
-            if cure and cure in p.status_effects:
-                p.status_effects[cure] = 0
-                pyxel.play(2, 2)
+            if cure and target.status_effects.get(cure, 0) > 0:
+                target.status_effects[cure] = 0
+                if not played_se:
+                    pyxel.play(2, 2)
         p.inventory.remove(item)
         self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
         return False
@@ -2050,7 +2135,8 @@ class App:
             self._draw_dungeon_shop()
         elif self.state == STATE_ENDING:
             self._draw_ending()
-        elif self.state in (STATE_INVENTORY, STATE_INV_ACTION, STATE_INV_GIVE_NPC):
+        elif self.state in (STATE_INVENTORY, STATE_INV_ACTION, STATE_INV_GIVE_NPC,
+                            STATE_INV_TARGET_SELECT):
             self._draw_inventory()
         elif self.state == STATE_HOME:
             self._draw_home()
@@ -2419,6 +2505,37 @@ class App:
                                    f"Acc:{npc_acc}", COL_LIGHT_GRAY)
                 pyxel.text(cx, cy + ch - 8, "Z:Equip  X:Cancel", COL_DARK_GRAY)
             self.sub_win.draw(_npc_sel_content)
+
+        if self.state == STATE_INV_TARGET_SELECT:
+            def _target_content(cx, cy, _cw, ch):
+                item = self.pending_use_item
+                item_name = self._item_label(item)[:24] if item else "None"
+                pyxel.text(cx, cy, "== Use Item ==", COL_YELLOW)
+                pyxel.text(cx, cy + 10, item_name, COL_PEACH)
+                targets = self._item_targets(item) if item else []
+                if not targets:
+                    pyxel.text(cx, cy + 28, "No targets.", COL_DARK_GRAY)
+                for i, target in enumerate(targets):
+                    cursor = ">" if i == self.inv_target_idx else " "
+                    can_use = self._can_use_item_on(item, target)
+                    col = COL_YELLOW if i == self.inv_target_idx and can_use else (
+                        COL_WHITE if can_use else COL_DARK_GRAY)
+                    pyxel.text(cx, cy + 28 + i * 18,
+                               f"{cursor} {target.name[:8]}", col)
+                    pyxel.text(cx + 72, cy + 28 + i * 18,
+                               f"HP:{target.hp}/{target.max_hp}", col)
+                    pyxel.text(cx + 136, cy + 28 + i * 18,
+                               f"MP:{target.mp}/{target.max_mp}", col)
+                    icons = []
+                    if target.status_effects.get("poison", 0) > 0:
+                        icons.append("P")
+                    if target.status_effects.get("stun", 0) > 0:
+                        icons.append("S")
+                    if icons:
+                        pyxel.text(cx + 190, cy + 28 + i * 18,
+                                   "[" + "".join(icons) + "]", COL_ORANGE)
+                pyxel.text(cx, cy + ch - 8, "Z:Use  X:Cancel", COL_DARK_GRAY)
+            self.sub_win.draw(_target_content)
 
     def _draw_dungeon_skill(self):
         def _content(cx, cy, cw, ch):

@@ -78,6 +78,7 @@ STATE_DUNGEON_SHOP       = 18
 STATE_TITLE              = 19
 STATE_JOB_SELECT         = 20
 STATE_LOG_VIEW           = 23
+STATE_INV_TARGET_SELECT  = 24
 
 # Tile types
 TILE_FLOOR       = 0
