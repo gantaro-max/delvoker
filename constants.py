@@ -77,6 +77,7 @@ STATE_DUNGEON_SKILL      = 17
 STATE_DUNGEON_SHOP       = 18
 STATE_TITLE              = 19
 STATE_JOB_SELECT         = 20
+STATE_LOG_VIEW           = 23
 
 # Tile types
 TILE_FLOOR       = 0
@@ -109,7 +110,7 @@ PROMOTION_COST = 1000
 DROP_RATE      = 0.35
 ENCOUNTER_RATE = 0.15
 FLEE_RATE      = 0.5
-COMMANDS       = ["Fight", "Skill", "Flee"]
+COMMANDS       = ["Aid", "Skill", "Flee"]
 
 # Menus
 TOWN_MENU           = ["Inn", "Guild", "Shop", "Stats", "Revive", "Home", "Enter Dungeon"]
@@ -129,6 +130,6 @@ _BGM_ZONES = {
     STATE_DUNGEON: 1,      STATE_DUNGEON_SKILL: 1,   STATE_DUNGEON_SHOP: 1,
     STATE_BATTLE_CMD: 2,   STATE_BATTLE_MSG: 2,      STATE_BATTLE_END: 2,
     STATE_BATTLE_NPC_CMD: 2, STATE_BATTLE_TARGET_PART: 2, STATE_BATTLE_TARGET: 2,
-    STATE_BATTLE_SKILL: 2,
+    STATE_BATTLE_SKILL: 2, STATE_LOG_VIEW: 2,
     STATE_ENDING: -1,
 }

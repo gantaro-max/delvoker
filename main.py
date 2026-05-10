@@ -14,7 +14,7 @@ from constants import (
     STATE_BATTLE_NPC_CMD, STATE_GUILD, STATE_STAT_ALLOC,
     STATE_BATTLE_TARGET_PART, STATE_BATTLE_TARGET, STATE_REVIVE, STATE_INV_GIVE_NPC,
     STATE_HOME, STATE_ENDING, STATE_DUNGEON_SKILL, STATE_DUNGEON_SHOP,
-    STATE_TITLE, STATE_JOB_SELECT, STATE_BATTLE_SKILL,
+    STATE_TITLE, STATE_JOB_SELECT, STATE_BATTLE_SKILL, STATE_LOG_VIEW,
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
     TILE_FOUNTAIN, TILE_MERCHANT,
@@ -69,6 +69,17 @@ def _encounter_pool(floor):
 
 # Global dungeon map (set by _enter_dungeon_fresh / _next_floor)
 _dungeon_map = None
+LOG_HISTORY_MAX = 100
+LOG_VIEW_LINES = 12
+LOG_VIEW_STATES = (
+    STATE_BATTLE_CMD,
+    STATE_BATTLE_NPC_CMD,
+    STATE_BATTLE_TARGET,
+    STATE_BATTLE_TARGET_PART,
+    STATE_BATTLE_SKILL,
+    STATE_BATTLE_MSG,
+    STATE_BATTLE_END,
+)
 
 
 def is_wall(x, y):
@@ -111,6 +122,7 @@ class Enemy:
         self.broken_parts = set()
         self.sprite_u = edef.sprite_u
         self.sprite_v = edef.sprite_v
+        self.flip_x = random.random() < 0.5
 
 
 class Effect:
@@ -151,8 +163,11 @@ class App:
         self._attack_target = None
         self.cmd_idx = 0
         self.messages = []
+        self.message_history = []
         self.msg_idx = 0
         self.next_state = None
+        self.log_return_state = STATE_BATTLE_CMD
+        self.log_scroll = 0
         self.battle_won = False
         self.level_up_gains = []
         self._current_enemy_key = None
@@ -230,7 +245,7 @@ class App:
         # Title / job select
         self.title_idx = 0
         self.job_select_idx = 0
-        self.unlocked_jobs = ["warrior"]
+        self.unlocked_jobs = ["porter"]
 
         # Dungeon merchant shop
         self.merchant_shop_idx = 0
@@ -893,8 +908,15 @@ class App:
         self.add_popup(f"-{dmg}", 116, 68, popup_col)
         self.effects.append(Effect(128, 63, "spark"))
 
-        msgs = [f"[CRITICAL!] {enemy.name}: -{dmg} HP!" if is_crit
-                else f"{enemy.name}: -{dmg} HP!"]
+        _aid_verbs = [
+            "distracts", "taunts", "harasses", "baits", "lures",
+            "throws debris at", "feints against", "bluffs at",
+        ]
+        _aid_verb = _aid_verbs[pyxel.frame_count % len(_aid_verbs)]
+        if is_crit:
+            msgs = [f"[CRITICAL!] {self.player.name} {_aid_verb} {enemy.name}! -{dmg} HP!"]
+        else:
+            msgs = [f"{self.player.name} {_aid_verb} {enemy.name}! -{dmg} HP!"]
 
         if part_name and part_name in enemy.part_hps and part_name not in enemy.broken_parts:
             enemy.part_hps[part_name] = max(
@@ -1094,7 +1116,21 @@ class App:
             return COL_PEACH
         return COL_WHITE
 
+    def _append_message_history(self, messages):
+        for msg in messages:
+            if msg:
+                self.message_history.append(msg)
+        if len(self.message_history) > LOG_HISTORY_MAX:
+            self.message_history = self.message_history[-LOG_HISTORY_MAX:]
+
+    def _open_log_view(self):
+        self.log_return_state = self.state
+        max_scroll = max(0, len(self.message_history) - LOG_VIEW_LINES)
+        self.log_scroll = max_scroll
+        self.state = STATE_LOG_VIEW
+
     def _show_msgs(self, messages, next_state, colors=None):
+        self._append_message_history(messages)
         self.messages = messages
         self.msg_colors = colors or []
         self.msg_idx = 0
@@ -1106,6 +1142,13 @@ class App:
     def update(self):
         if pyxel.btnp(pyxel.KEY_Q):
             pyxel.quit()
+
+        if self.state == STATE_LOG_VIEW:
+            self._upd_log_view()
+            return
+        if self.state in LOG_VIEW_STATES and pyxel.btnp(pyxel.KEY_L):
+            self._open_log_view()
+            return
 
         if self.flash_timer > 0:
             self.flash_timer -= 1
@@ -1176,6 +1219,24 @@ class App:
             self._upd_dungeon_shop()
         elif self.state == STATE_ENDING:
             self._upd_ending()
+
+    def _upd_log_view(self):
+        total = len(self.message_history)
+        max_scroll = max(0, total - LOG_VIEW_LINES)
+        if pyxel.btnp(pyxel.KEY_X) or pyxel.btnp(pyxel.KEY_L):
+            self.state = self.log_return_state
+            return
+        if total == 0:
+            self.log_scroll = 0
+            return
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.log_scroll = max(0, self.log_scroll - 1)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.log_scroll = min(max_scroll, self.log_scroll + 1)
+        if pyxel.btnp(pyxel.KEY_LEFT):
+            self.log_scroll = max(0, self.log_scroll - LOG_VIEW_LINES)
+        if pyxel.btnp(pyxel.KEY_RIGHT):
+            self.log_scroll = min(max_scroll, self.log_scroll + LOG_VIEW_LINES)
 
     def _upd_dungeon(self):
         global _dungeon_map
@@ -1310,7 +1371,7 @@ class App:
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             npc = self.current_npc_actor
             etgt = self.enemies[0] if self.enemies else None
-            if self.npc_cmd_idx == 0 and etgt:  # Fight
+            if self.npc_cmd_idx == 0 and etgt:  # Aid
                 dmg = self._calc_dmg(npc.weapon, etgt.def_, etgt)
                 etgt.hp = max(0, etgt.hp - dmg)
                 self._round_msgs.append(
@@ -1360,7 +1421,7 @@ class App:
         if pyxel.btnp(pyxel.KEY_DOWN):
             self.cmd_idx = (self.cmd_idx + 1) % len(COMMANDS)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
-            if self.cmd_idx == 0:  # Fight
+            if self.cmd_idx == 0:  # Aid
                 if len(self.enemies) > 1:
                     self.target_idx = 0
                     self.state = STATE_BATTLE_TARGET
@@ -1398,7 +1459,7 @@ class App:
             sk = skills[self.skill_idx]
             if self.player.mp < sk.mp_cost:
                 return  # not enough MP; stay on skill screen
-            if sk.effect_type == "provoke":
+            if sk.effect_type in ("provoke", "encourage"):
                 self._execute_active_skill(sk)
             else:
                 if len(self.enemies) > 1:
@@ -1414,7 +1475,16 @@ class App:
         p = self.player
         p.mp -= skill.mp_cost
         msgs = []
-        if skill.effect_type == "provoke":
+        if skill.effect_type == "encourage":
+            heal = skill.power + p.total_luk // 2
+            names = []
+            for m in self.party.alive:
+                m.hp = min(m.max_hp, m.hp + heal)
+                names.append(m.name)
+            msgs = [f"[Encourage] {p.name} cheers the party! +{heal} HP!",
+                    f"Restored: {', '.join(names)}"]
+            self._run_auto_and_enemy(msgs)
+        elif skill.effect_type == "provoke":
             p.status_effects["provoke"] = skill.power
             msgs = [f"{p.name} uses Provoke! Enemies focus on {p.name}! (-25% dmg)"]
             self._run_auto_and_enemy(msgs)
@@ -1804,7 +1874,7 @@ class App:
                                  for d in data.get("warehouse", [])]
         self.player.warehouse_max = data.get("warehouse_max", 10)
         self.player.perm_stats = data.get("perm_stats", {"str": 0, "def": 0, "mag": 0})
-        self.unlocked_jobs = data.get("unlocked_jobs", ["warrior"])
+        self.unlocked_jobs = data.get("unlocked_jobs", ["porter"])
         self.game_cleared = data.get("game_cleared", False)
         self.bestiary = data.get("bestiary", {})
 
@@ -1889,6 +1959,9 @@ class App:
             self._draw_guild()
         elif self.state == STATE_STAT_ALLOC:
             self._draw_stat_alloc()
+        elif self.state == STATE_LOG_VIEW:
+            self._draw_battle()
+            self._draw_log_view()
         else:
             self._draw_battle()
         if self.flash_timer > 10:
@@ -1958,6 +2031,31 @@ class App:
 
         self.sub_win.draw(_content)
 
+    def _enemy_palette_swaps(self, enemy):
+        key = getattr(enemy, "enemy_key", "")
+        if key in ("dungeon_master", "archdemon", "orc_chief"):
+            return [(COL_GREEN, COL_PINK), (COL_DARK_GREEN, COL_DARK_PURPLE),
+                    (COL_RED, COL_ORANGE)]
+        if self.dungeon_floor <= 3:
+            return []
+        if self.dungeon_floor <= 6:
+            return [(COL_GREEN, COL_BLUE), (COL_DARK_GREEN, COL_NAVY),
+                    (COL_RED, COL_INDIGO)]
+        return [(COL_GREEN, COL_RED), (COL_DARK_GREEN, COL_DARK_PURPLE),
+                (COL_BLUE, COL_ORANGE)]
+
+    def _draw_enemy_sprite(self, enemy, x, y):
+        if not self.assets_loaded:
+            return False
+        for orig, new in self._enemy_palette_swaps(enemy):
+            pyxel.pal(orig, new)
+        if enemy.flip_x:
+            pyxel.blt(x + 32, y, 0, enemy.sprite_u, enemy.sprite_v, -32, 32, 0)
+        else:
+            pyxel.blt(x, y, 0, enemy.sprite_u, enemy.sprite_v, 32, 32, 0)
+        pyxel.pal()
+        return True
+
     def _draw_battle(self):
         pyxel.cls(COL_BLACK)
 
@@ -1978,10 +2076,7 @@ class App:
             # Sprite / fallback rect
             sprite_x = cx - 16
             sprite_y = ey + (eh - 32) // 2
-            if self.assets_loaded:
-                pyxel.blt(sprite_x, sprite_y, 0,
-                          enemy.sprite_u, enemy.sprite_v, 32, 32, 0)
-            else:
+            if not self._draw_enemy_sprite(enemy, sprite_x, sprite_y):
                 rect_col = COL_DARK_GRAY if enemy.hp <= 0 else COL_RED
                 pyxel.rect(cx - 16, ey, 32, 40, rect_col)
 
@@ -2140,6 +2235,25 @@ class App:
         for pop in self.popups:
             float_y = pop["y"] - (20 - pop["timer"])
             pyxel.text(pop["x"], float_y, pop["text"], pop["color"])
+
+    def _draw_log_view(self):
+        x, y, w, h = 10, 18, SCREEN_W - 20, 142
+        pyxel.rect(x, y, w, h, COL_BLACK)
+        pyxel.rectb(x, y, w, h, COL_WHITE)
+        pyxel.text(x + 8, y + 6, "BATTLE LOG", COL_YELLOW)
+        pyxel.text(x + w - 78, y + 6, "L/X:Close", COL_DARK_GRAY)
+
+        lines = self.message_history
+        if not lines:
+            pyxel.text(x + 8, y + 24, "No logs.", COL_DARK_GRAY)
+        else:
+            start = min(self.log_scroll, max(0, len(lines) - LOG_VIEW_LINES))
+            visible = lines[start:start + LOG_VIEW_LINES]
+            for i, txt in enumerate(visible):
+                pyxel.text(x + 8, y + 22 + i * 9, txt[:54], self._msg_color(txt))
+            pos = f"{start + 1}-{start + len(visible)}/{len(lines)}"
+            pyxel.text(x + w - len(pos) * 4 - 8, y + h - 10, pos, COL_LIGHT_GRAY)
+        pyxel.text(x + 8, y + h - 10, "Up/Down:Scroll  Left/Right:Page", COL_DARK_GRAY)
 
     def _draw_inventory(self):
         pyxel.cls(COL_BLACK)
