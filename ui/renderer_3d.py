@@ -5,8 +5,8 @@ from constants import (
 )
 
 # Biome tile source coords (tx, ty) in image bank 0, each 8x8 px.
-# floor 1-2 → basic stone, 3-4 → deeper stone, 5+ → dark stone
-_BIOME_TILES = [(0, 0), (8, 0), (16, 0)]
+# floor 1-2 -> basic stone, 3-4 -> deeper stone, 5+ -> dark stone
+_BIOME_TILES = [(0, 64), (8, 64), (16, 64)]
 
 
 def _biome_tile(floor: int) -> tuple:
