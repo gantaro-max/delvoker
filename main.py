@@ -15,10 +15,12 @@ from constants import (
     STATE_BATTLE_TARGET_PART, STATE_BATTLE_TARGET, STATE_REVIVE, STATE_INV_GIVE_NPC,
     STATE_HOME, STATE_ENDING, STATE_DUNGEON_SKILL, STATE_DUNGEON_SHOP,
     STATE_TITLE, STATE_JOB_SELECT, STATE_BATTLE_SKILL, STATE_LOG_VIEW,
+    STATE_INV_TARGET_SELECT, STATE_NAME_INPUT,
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
     TILE_FOUNTAIN, TILE_MERCHANT,
     SAVE_FILE, INV_MAX, SHOP_KEYS, MERCHANT_KEYS, SHOP_COMMANDS,
+    SHOP_STOCK_SIZE, SHOP_RESTOCK_STEPS, SHOP_RARE_SLOT_RATE,
     PROMOTION_COST, DROP_RATE, ENCOUNTER_RATE, FLEE_RATE, COMMANDS,
     TOWN_MENU, STAT_ALLOC_NAMES, STAT_ALLOC_ATTRS,
     HOME_MENU, HOME_TRAIN_STATS, HOME_TRAIN_ATTRS,
@@ -43,6 +45,23 @@ _DROP_TIERS = [
     (6,  ["long_sword", "chain_mail"],                    ["potion", "ether", "grimoire_ice"]),
     (10, ["steel_sword", "mithril_sword", "steel_plate"], ["ether", "grimoire_poison"]),
 ]
+
+_SHOP_TIERS = [
+    ["short_sword", "staff", "leather_armor", "herb", "potion",
+     "antidote", "scroll_mapping", "grimoire_fire", "grimoire_heal",
+     "lucky_ring", "emergency_kit"],
+    ["long_sword", "chain_mail", "potion", "ether", "antidote",
+     "scroll_mapping", "grimoire_heal", "grimoire_ice", "mana_charm",
+     "emergency_kit"],
+    ["steel_sword", "mithril_sword", "steel_plate", "potion", "ether",
+     "antidote", "grimoire_ice", "grimoire_poison", "grimoire_return",
+     "rabbits_foot", "emergency_kit"],
+]
+
+_NAME_INPUT_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+_NAME_INPUT_ACTIONS = ["OK", "DEL"]
+_NAME_INPUT_COLUMNS = 8
+_NAME_MAX_LEN = 8
 
 
 def _drop_pools(floor):
@@ -138,18 +157,21 @@ class Effect:
 class App:
     def __init__(self):
         pyxel.init(SCREEN_W, SCREEN_H, title=TITLE, fps=FPS)
+        self.sprite_debug_logged = set()
+        asset_path = Path(__file__).with_name("assets.pyxres")
         try:
-            pyxel.load("assets.pyxres")
+            pyxel.load(str(asset_path))
             self.assets_loaded = True
-        except Exception:
+        except Exception as e:
             self.assets_loaded = False
+            print(f"[WARN] assets.pyxres load failed: {e}")
         self.px = 1
         self.py = 1
         self.dir = 1
 
         self.player = Player()
 
-        # Party (player + up to 2 NPC members)
+        # Party (player + up to 3 NPC members)
         self.party = Party(self.player)
         demo_npc = NPCMember("warrior", "Gard", "reckless")
         self.party.add(demo_npc)
@@ -189,10 +211,14 @@ class App:
         self.inv_action_idx = 0
         self.inv_actions = []
         self.pre_inv_state = STATE_TOWN
+        self.inv_target_idx = 0
+        self.pending_use_item = None
 
         # Shop state
         self.shop_idx  = 0
         self.shop_mode = "buy"
+        self.shop_stock = []
+        self.steps_to_restock = SHOP_RESTOCK_STEPS
 
         # Guild state
         self.guild_idx = 0
@@ -245,6 +271,9 @@ class App:
         # Title / job select
         self.title_idx = 0
         self.job_select_idx = 0
+        self.player_name = "HERO"
+        self.name_input_text = "HERO"
+        self.name_input_cursor = 0
         self.unlocked_jobs = ["porter"]
 
         # Dungeon merchant shop
@@ -274,6 +303,7 @@ class App:
         self.shop_win = Window(8,  10, 240, 230, title="- SHOP -")
 
         self.state = None
+        self._restock_shop(force=True)
         self._init_audio()
         self._set_state(STATE_TITLE)
 
@@ -284,6 +314,87 @@ class App:
     def add_popup(self, text, x, y, color):
         self.popups.append({"text": text, "x": x, "y": y,
                            "color": color, "timer": 20})
+
+    def _item_label(self, item):
+        return item.label() if hasattr(item, "label") else item.name
+
+    def _item_color(self, item, selected=False, enabled=True):
+        if not enabled:
+            return COL_DARK_GRAY
+        rarity = getattr(item, "rarity", "normal")
+        if rarity == "genesis":
+            return COL_WHITE if (pyxel.frame_count // 10) % 2 == 0 else COL_BLUE
+        if rarity == "legend":
+            return COL_ORANGE
+        if rarity == "epic":
+            return COL_PEACH
+        if rarity == "rare":
+            return COL_YELLOW
+        if getattr(item, "is_cursed", False):
+            return COL_DARK_PURPLE
+        return COL_YELLOW if selected else COL_WHITE
+
+    def _shop_tier_index(self, floor=None):
+        floor = self.dungeon_floor if floor is None else floor
+        if floor <= 3:
+            return 0
+        if floor <= 6:
+            return 1
+        return 2
+
+    def _shop_tier_keys(self, tier_idx=None):
+        tier_idx = self._shop_tier_index() if tier_idx is None else tier_idx
+        keys = []
+        for idx in range(0, min(tier_idx, len(_SHOP_TIERS) - 1) + 1):
+            keys.extend(_SHOP_TIERS[idx])
+        valid = [k for k in keys if k in SHOP_KEYS and k in ITEM_CATALOG]
+        return list(dict.fromkeys(valid))
+
+    def _make_shop_item(self, key, enchanted=False):
+        item = ITEM_CATALOG[key]
+        if enchanted and item.kind == "weapon":
+            return make_enchanted_weapon(key)
+        if enchanted and item.kind == "armor":
+            return make_enchanted_armor(key)
+        return item.clone()
+
+    def _make_rare_shop_item(self):
+        tier = self._shop_tier_index()
+        upper_keys = self._shop_tier_keys(min(tier + 1, len(_SHOP_TIERS) - 1))
+        upper_keys = [k for k in upper_keys if k not in self._shop_tier_keys(tier)]
+        gear_keys = [k for k in self._shop_tier_keys(min(tier + 1, len(_SHOP_TIERS) - 1))
+                     if ITEM_CATALOG[k].kind in ("weapon", "armor")]
+        if upper_keys and random.random() < 0.5:
+            return self._make_shop_item(random.choice(upper_keys))
+        for _ in range(8):
+            key = random.choice(gear_keys or self._shop_tier_keys())
+            item = self._make_shop_item(key, enchanted=True)
+            if getattr(item, "rarity", "normal") != "normal":
+                return item
+        return self._make_shop_item(random.choice(gear_keys or self._shop_tier_keys()), enchanted=True)
+
+    def _restock_shop(self, force=False):
+        keys = self._shop_tier_keys()
+        if not keys:
+            self.shop_stock = []
+            self.steps_to_restock = SHOP_RESTOCK_STEPS
+            return
+        if len(keys) >= SHOP_STOCK_SIZE:
+            chosen = random.sample(keys, SHOP_STOCK_SIZE)
+        else:
+            chosen = list(keys)
+            while len(chosen) < SHOP_STOCK_SIZE:
+                chosen.append(random.choice(keys))
+        self.shop_stock = [self._make_shop_item(k) for k in chosen]
+        if self.shop_stock and random.random() < SHOP_RARE_SLOT_RATE:
+            self.shop_stock[random.randrange(len(self.shop_stock))] = self._make_rare_shop_item()
+        self.shop_idx = min(self.shop_idx, max(0, len(self.shop_stock) - 1))
+        self.steps_to_restock = SHOP_RESTOCK_STEPS
+
+    def _tick_shop_restock(self):
+        self.steps_to_restock -= 1
+        if self.steps_to_restock <= 0:
+            self._restock_shop()
 
     def _init_audio(self):
         # SE 0: attack (noise burst)
@@ -306,7 +417,7 @@ class App:
 
     def _set_state(self, new_state):
         self.state = new_state
-        if new_state in (STATE_TITLE, STATE_JOB_SELECT):
+        if new_state in (STATE_TITLE, STATE_JOB_SELECT, STATE_NAME_INPUT):
             self.town_win.close()
             self.status_win.close()
             self.sub_win.close()
@@ -342,6 +453,10 @@ class App:
         elif new_state == STATE_INV_ACTION:
             self.sub_win.close()
             self.inv_action_win.open()
+        elif new_state == STATE_INV_TARGET_SELECT:
+            self.inv_action_win.close()
+            self.sub_win.title = "Use Item"
+            self.sub_win.open()
         elif new_state == STATE_INV_GIVE_NPC:
             self.inv_action_win.close()
             self.sub_win.open()
@@ -438,6 +553,7 @@ class App:
         self.py = _dungeon_map.start_y
         _dungeon_map.visit(self.px, self.py)
         self._spawn_dungeon_npcs()
+        self._restock_shop(force=True)
 
     def _spawn_dungeon_npcs(self):
         floor_tiles = [
@@ -533,14 +649,67 @@ class App:
             self.title_idx = (self.title_idx + 1) % len(options)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             sel = options[self.title_idx]
-            self.player = Player()
             if sel == "Continue":
+                self.player = Player("porter")
                 self.load_data()
+                self._grant_job_skill("porter")
+                self.party = Party(self.player)
+                demo_npc = NPCMember("warrior", "Gard", "reckless")
+                self.party.add(demo_npc)
+                self._set_state(STATE_TOWN)
             else:
-                self.unlocked_jobs = ["warrior"]
+                self.player_name = "HERO"
+                self.name_input_text = "HERO"
+                self.name_input_cursor = 0
+                self.unlocked_jobs = ["porter"]
                 self.game_cleared = False
-            self.job_select_idx = 0
-            self._set_state(STATE_JOB_SELECT)
+                self._set_state(STATE_NAME_INPUT)
+
+    def _start_new_game(self):
+        self.player_name = (self.name_input_text or "HERO")[:_NAME_MAX_LEN]
+        self.player = Player("porter")
+        self.player.name = self.player_name
+        self._grant_job_skill("porter")
+        self.unlocked_jobs = ["porter"]
+        self.game_cleared = False
+        self.bestiary = {}
+        self.party = Party(self.player)
+        demo_npc = NPCMember("warrior", "Gard", "reckless")
+        self.party.add(demo_npc)
+        self._set_state(STATE_TOWN)
+
+    def _upd_name_input(self):
+        total = len(_NAME_INPUT_CHARS) + len(_NAME_INPUT_ACTIONS)
+        if pyxel.btnp(pyxel.KEY_LEFT):
+            self.name_input_cursor = (self.name_input_cursor - 1) % total
+        if pyxel.btnp(pyxel.KEY_RIGHT):
+            self.name_input_cursor = (self.name_input_cursor + 1) % total
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.name_input_cursor = (
+                self.name_input_cursor - _NAME_INPUT_COLUMNS) % total
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.name_input_cursor = (
+                self.name_input_cursor + _NAME_INPUT_COLUMNS) % total
+        if pyxel.btnp(pyxel.KEY_X):
+            if self.name_input_text:
+                self.name_input_text = self.name_input_text[:-1]
+            else:
+                self.name_input_text = "HERO"
+                self._set_state(STATE_TITLE)
+            return
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            idx = self.name_input_cursor
+            if idx < len(_NAME_INPUT_CHARS):
+                if len(self.name_input_text) < _NAME_MAX_LEN:
+                    self.name_input_text += _NAME_INPUT_CHARS[idx]
+            else:
+                action = _NAME_INPUT_ACTIONS[idx - len(_NAME_INPUT_CHARS)]
+                if action == "OK":
+                    if not self.name_input_text:
+                        self.name_input_text = "HERO"
+                    self._start_new_game()
+                elif action == "DEL" and self.name_input_text:
+                    self.name_input_text = self.name_input_text[:-1]
 
     def _upd_job_select(self):
         jobs = self.unlocked_jobs
@@ -580,11 +749,18 @@ class App:
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             sel = TOWN_MENU[self.town_cmd_idx]
             if sel == "Inn":
-                self.player.hp = self.player.max_hp
-                self.player.mp = self.player.max_mp
+                fallen = False
+                for member in self.party.members:
+                    if member.hp > 0:
+                        member.hp = member.max_hp
+                        member.mp = member.max_mp
+                    else:
+                        fallen = True
                 self.sub_win.title = "Inn"
                 self.town_sub_lines = ["Welcome! Rest well.",
-                                       "HP and MP fully restored."]
+                                       "The party's HP and MP are fully restored."]
+                if fallen:
+                    self.town_sub_lines.append("Fallen members need Revive.")
                 self._dialog_return_state = STATE_TOWN
                 self._set_state(STATE_TOWN_SUB)
             elif sel == "Guild":
@@ -1175,6 +1351,8 @@ class App:
 
         if self.state == STATE_TITLE:
             self._upd_title()
+        elif self.state == STATE_NAME_INPUT:
+            self._upd_name_input()
         elif self.state == STATE_JOB_SELECT:
             self._upd_job_select()
         elif self.state == STATE_TOWN:
@@ -1195,6 +1373,8 @@ class App:
             self._upd_inventory()
         elif self.state == STATE_INV_ACTION:
             self._upd_inv_action()
+        elif self.state == STATE_INV_TARGET_SELECT:
+            self._upd_inv_target_select()
         elif self.state == STATE_SHOP:
             self._upd_shop()
         elif self.state == STATE_GUILD:
@@ -1291,6 +1471,7 @@ class App:
             if _dungeon_map is not None:
                 _dungeon_map.visit(self.px, self.py)
             self.steps_since_encounter += 1
+            self._tick_shop_restock()
             tile = _dungeon_map.tile_at(
                 self.px, self.py) if _dungeon_map else 0
             if tile == TILE_STAIRS:
@@ -1580,7 +1761,12 @@ class App:
             if sel == "Equip":
                 self._do_equip(item)
             elif sel == "Use":
-                if self._do_use(item):
+                if self._use_needs_target(item):
+                    self.pending_use_item = item
+                    self.inv_target_idx = 0
+                    self._set_state(STATE_INV_TARGET_SELECT)
+                    return
+                if self._do_use(item, self.player):
                     return
             elif sel == "Drop":
                 self.player.inventory.remove(item)
@@ -1591,6 +1777,59 @@ class App:
                 self.give_npc_idx = 0
                 self._set_state(STATE_INV_GIVE_NPC)
                 return
+            self._set_state(STATE_INVENTORY)
+
+    def _use_needs_target(self, item):
+        return (item.kind == "consumable"
+                and not isinstance(item, GrimoireItem)
+                and item.name != "Scroll: Mapping")
+
+    def _item_targets(self, item):
+        return list(self.party.members)
+
+    def _can_use_item_on(self, item, target):
+        if not target or target.hp <= 0:
+            return False
+        hp_ok = getattr(item, "hp_restore", 0) > 0 and target.hp < target.max_hp
+        max_mp = getattr(target, "max_mp", 0)
+        mp_ok = getattr(item, "mp_restore", 0) > 0 and target.mp < max_mp
+        cure = getattr(item, "cure_status", "")
+        cure_ok = bool(cure and target.status_effects.get(cure, 0) > 0)
+        return hp_ok or mp_ok or cure_ok
+
+    def _party_card_popup_pos(self, target):
+        try:
+            idx = self.party.members.index(target)
+        except ValueError:
+            idx = 0
+        card_w = SCREEN_W // Party.MAX_SIZE
+        x = idx * card_w + card_w // 2 - 8
+        return x, STATUS_Y + 12
+
+    def _upd_inv_target_select(self):
+        item = self.pending_use_item
+        targets = self._item_targets(item) if item else []
+        if pyxel.btnp(pyxel.KEY_X):
+            self.pending_use_item = None
+            self._set_state(STATE_INV_ACTION)
+            return
+        if not item or not targets:
+            if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+                self.pending_use_item = None
+                self._set_state(STATE_INVENTORY)
+            return
+        self.inv_target_idx = min(self.inv_target_idx, len(targets) - 1)
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.inv_target_idx = (self.inv_target_idx - 1) % len(targets)
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.inv_target_idx = (self.inv_target_idx + 1) % len(targets)
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            target = targets[self.inv_target_idx]
+            if not self._can_use_item_on(item, target):
+                self.sub_win.title = "Use Item"
+                return
+            self._do_use(item, target)
+            self.pending_use_item = None
             self._set_state(STATE_INVENTORY)
 
     def _do_equip(self, item):
@@ -1657,8 +1896,9 @@ class App:
             self.give_npc_item = None
             self._set_state(STATE_INVENTORY)
 
-    def _do_use(self, item):
+    def _do_use(self, item, target=None):
         p = self.player
+        target = target or p
         if item.name == "Scroll: Mapping":
             if _dungeon_map:
                 for vy in range(_dungeon_map.height):
@@ -1680,16 +1920,26 @@ class App:
                 p.skills.pop(0)
             p.skills.append(new_skill)
         else:
-            heal_hp = min(p.max_hp - p.hp, item.hp_restore)
-            p.hp = min(p.max_hp, p.hp + item.hp_restore)
-            p.mp = min(p.max_mp, p.mp + item.mp_restore)
+            if not self._can_use_item_on(item, target):
+                return False
+            heal_hp = min(target.max_hp - target.hp, item.hp_restore)
+            heal_mp = min(target.max_mp - target.mp, item.mp_restore)
+            target.hp = min(target.max_hp, target.hp + item.hp_restore)
+            target.mp = min(target.max_mp, target.mp + item.mp_restore)
+            played_se = False
             if heal_hp > 0:
-                self.add_popup(f"+{heal_hp}", 46, 130, COL_GREEN)
+                px, py = self._party_card_popup_pos(target)
+                self.add_popup(f"+{heal_hp}", px, py, COL_GREEN)
                 pyxel.play(2, 2)
+                played_se = True
+            if heal_mp > 0 and not played_se:
+                pyxel.play(2, 2)
+                played_se = True
             cure = getattr(item, "cure_status", "")
-            if cure and cure in p.status_effects:
-                p.status_effects[cure] = 0
-                pyxel.play(2, 2)
+            if cure and target.status_effects.get(cure, 0) > 0:
+                target.status_effects[cure] = 0
+                if not played_se:
+                    pyxel.play(2, 2)
         p.inventory.remove(item)
         self.inv_idx = min(self.inv_idx, max(0, len(p.inventory) - 1))
         return False
@@ -1869,6 +2119,9 @@ class App:
         data = load_game()
         if not data:
             return
+        self.player.name = data.get("player_name", "HERO")
+        self.player_name = self.player.name
+        self.name_input_text = self.player.name
         self.player.gold = data.get("gold", 0)
         self.player.warehouse = [deserialize_item(d)
                                  for d in data.get("warehouse", [])]
@@ -1889,14 +2142,18 @@ class App:
             self.shop_idx = 0
             return
         if self.shop_mode == "buy":
+            if not self.shop_stock:
+                self._restock_shop(force=True)
+            if not self.shop_stock:
+                return
             if pyxel.btnp(pyxel.KEY_UP):
-                self.shop_idx = (self.shop_idx - 1) % len(SHOP_KEYS)
+                self.shop_idx = (self.shop_idx - 1) % len(self.shop_stock)
             if pyxel.btnp(pyxel.KEY_DOWN):
-                self.shop_idx = (self.shop_idx + 1) % len(SHOP_KEYS)
+                self.shop_idx = (self.shop_idx + 1) % len(self.shop_stock)
             if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
                 if len(self.player.inventory) >= INV_MAX:
                     return
-                item = ITEM_CATALOG[SHOP_KEYS[self.shop_idx]]
+                item = self.shop_stock[self.shop_idx]
                 if self.player.gold >= item.value:
                     self.player.gold -= item.value
                     self.player.inventory.append(item.clone())
@@ -1911,7 +2168,7 @@ class App:
                 self.shop_idx = (self.shop_idx + 1) % len(inv)
             if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
                 item = inv[self.shop_idx]
-                if item is self.player.weapon or item is self.player.armor:
+                if item is self.player.weapon or item is self.player.armor or item is self.player.accessory:
                     return
                 sell_price = int(item.value * 0.3)
                 self.player.gold += sell_price
@@ -1926,6 +2183,8 @@ class App:
         pyxel.cls(COL_NAVY)
         if self.state == STATE_TITLE:
             self._draw_title()
+        elif self.state == STATE_NAME_INPUT:
+            self._draw_name_input()
         elif self.state == STATE_JOB_SELECT:
             self._draw_job_select()
         elif self.state == STATE_TOWN:
@@ -1947,7 +2206,8 @@ class App:
             self._draw_dungeon_shop()
         elif self.state == STATE_ENDING:
             self._draw_ending()
-        elif self.state in (STATE_INVENTORY, STATE_INV_ACTION, STATE_INV_GIVE_NPC):
+        elif self.state in (STATE_INVENTORY, STATE_INV_ACTION, STATE_INV_GIVE_NPC,
+                            STATE_INV_TARGET_SELECT):
             self._draw_inventory()
         elif self.state == STATE_HOME:
             self._draw_home()
@@ -2044,17 +2304,53 @@ class App:
         return [(COL_GREEN, COL_RED), (COL_DARK_GREEN, COL_DARK_PURPLE),
                 (COL_BLUE, COL_ORANGE)]
 
+    def _sprite_warn_once(self, key, message):
+        if key in self.sprite_debug_logged:
+            return
+        self.sprite_debug_logged.add(key)
+        print(f"[WARN] {message}")
+
+    def _draw_enemy_fallback(self, enemy, x, y, reason="fallback"):
+        key = getattr(enemy, "enemy_key", getattr(enemy, "name", "enemy"))
+        log_key = (key, reason)
+        if reason:
+            self._sprite_warn_once(
+                log_key,
+                f"enemy sprite {reason}: key={key} "
+                f"u={getattr(enemy, 'sprite_u', None)} "
+                f"v={getattr(enemy, 'sprite_v', None)} x={x} y={y} "
+                f"assets_loaded={self.assets_loaded}"
+            )
+        rect_col = COL_DARK_GRAY if enemy.hp <= 0 else COL_RED
+        pyxel.rect(x, y, 32, 32, rect_col)
+        pyxel.rectb(x, y, 32, 32, COL_WHITE)
+        label = getattr(enemy, "name", "?")[:1].upper()
+        pyxel.text(x + 14, y + 13, label, COL_WHITE)
+
     def _draw_enemy_sprite(self, enemy, x, y):
         if not self.assets_loaded:
+            self._draw_enemy_fallback(enemy, x, y, "assets_not_loaded")
             return False
-        for orig, new in self._enemy_palette_swaps(enemy):
-            pyxel.pal(orig, new)
-        if enemy.flip_x:
-            pyxel.blt(x + 32, y, 0, enemy.sprite_u, enemy.sprite_v, -32, 32, 0)
-        else:
-            pyxel.blt(x, y, 0, enemy.sprite_u, enemy.sprite_v, 32, 32, 0)
-        pyxel.pal()
-        return True
+        sprite_u = getattr(enemy, "sprite_u", None)
+        sprite_v = getattr(enemy, "sprite_v", None)
+        if sprite_u is None or sprite_v is None or sprite_u < 0 or sprite_v < 0:
+            self._draw_enemy_fallback(enemy, x, y, "invalid_coords")
+            return False
+        try:
+            for orig, new in self._enemy_palette_swaps(enemy):
+                if 0 <= orig <= 15 and 0 <= new <= 15 and new != COL_BLACK:
+                    pyxel.pal(orig, new)
+            if enemy.flip_x:
+                pyxel.blt(x + 32, y, 0, sprite_u, sprite_v, -32, 32, 0)
+            else:
+                pyxel.blt(x, y, 0, sprite_u, sprite_v, 32, 32, 0)
+            return True
+        except Exception as e:
+            pyxel.pal()
+            self._draw_enemy_fallback(enemy, x, y, f"blt_failed:{e}")
+            return False
+        finally:
+            pyxel.pal()
 
     def _draw_battle(self):
         pyxel.cls(COL_BLACK)
@@ -2076,9 +2372,7 @@ class App:
             # Sprite / fallback rect
             sprite_x = cx - 16
             sprite_y = ey + (eh - 32) // 2
-            if not self._draw_enemy_sprite(enemy, sprite_x, sprite_y):
-                rect_col = COL_DARK_GRAY if enemy.hp <= 0 else COL_RED
-                pyxel.rect(cx - 16, ey, 32, 40, rect_col)
+            self._draw_enemy_sprite(enemy, sprite_x, sprite_y)
 
             # HP bar
             bar_w = min(80, slot_w - 4)
@@ -2115,12 +2409,14 @@ class App:
             pyxel.text(icon_x, 134, "[S]", COL_YELLOW)
 
         # NPC HP
+        npc_slot_w = 84
         for i, npc in enumerate(self.party.members[1:]):
             npc_col = COL_GREEN if npc.hp > npc.max_hp * \
                 0.4 else (COL_ORANGE if npc.hp > 0 else COL_RED)
-            pyxel.text(4 + i * 128, 142,
-                       f"{npc.name[:6]} HP:{npc.hp}/{npc.max_hp}", npc_col)
-            npc_icon_x = 4 + i * 128 + 80
+            npc_x = 4 + i * npc_slot_w
+            pyxel.text(npc_x, 142,
+                       f"{npc.name[:5]} HP:{npc.hp}/{npc.max_hp}", npc_col)
+            npc_icon_x = npc_x + 58
             if npc.status_effects.get("poison", 0) > 0:
                 pyxel.text(npc_icon_x, 142, "[P]", COL_GREEN)
                 npc_icon_x += 16
@@ -2265,22 +2561,11 @@ class App:
             else:
                 for i, item in enumerate(inv):
                     cursor = ">" if i == self.inv_idx else " "
-                    eq = item is self.player.weapon or item is self.player.armor
+                    eq = item is self.player.weapon or item is self.player.armor or item is self.player.accessory
                     tag = {"weapon": "W", "armor": "A",
-                           "consumable": "C"}.get(item.kind, "?")
-                    if eq:
-                        name_col = COL_GREEN
-                    elif isinstance(item, EnchantedWeapon):
-                        name_col = {
-                            "cursed": COL_DARK_PURPLE,
-                            "rare":   COL_ORANGE,
-                            "magic":  COL_YELLOW,
-                        }.get(item.rarity, COL_WHITE)
-                    elif isinstance(item, EnchantedArmor):
-                        name_col = COL_YELLOW if item.rarity == "magic" else COL_WHITE
-                    else:
-                        name_col = COL_WHITE
-                    display = item.label() if hasattr(item, "label") else item.name
+                           "consumable": "C", "accessory": "Acc"}.get(item.kind, "?")
+                    name_col = COL_GREEN if eq else self._item_color(item)
+                    display = self._item_label(item)
                     pyxel.text(cx,           cy + i * 14,
                                f"{cursor} {display}", name_col)
                     pyxel.text(cx + cw - 12, cy + i * 14,
@@ -2312,21 +2597,53 @@ class App:
                 if not npc_members:
                     pyxel.text(cx, cy + 24, "No NPC in party.", COL_DARK_GRAY)
                 else:
+                    row_h = 24
                     for i, npc in enumerate(npc_members):
                         cursor = ">" if i == self.give_npc_idx else " "
                         col = COL_YELLOW if i == self.give_npc_idx else COL_WHITE
-                        pyxel.text(cx, cy + 24 + i * 28,
+                        pyxel.text(cx, cy + 24 + i * row_h,
                                    f"{cursor} {npc.name}", col)
                         npc_wp  = npc.weapon.name[:14]    if npc.weapon    else "None"
                         npc_ar  = npc.armor.name[:14]     if npc.armor     else "None"
                         npc_acc = getattr(npc, "accessory", None)
                         npc_acc = npc_acc.name[:12] if npc_acc else "None"
-                        pyxel.text(cx + 8, cy + 24 + i * 28 + 9,
+                        pyxel.text(cx + 8, cy + 24 + i * row_h + 8,
                                    f"W:{npc_wp}  A:{npc_ar}", COL_LIGHT_GRAY)
-                        pyxel.text(cx + 8, cy + 24 + i * 28 + 18,
+                        pyxel.text(cx + 8, cy + 24 + i * row_h + 16,
                                    f"Acc:{npc_acc}", COL_LIGHT_GRAY)
                 pyxel.text(cx, cy + ch - 8, "Z:Equip  X:Cancel", COL_DARK_GRAY)
             self.sub_win.draw(_npc_sel_content)
+
+        if self.state == STATE_INV_TARGET_SELECT:
+            def _target_content(cx, cy, _cw, ch):
+                item = self.pending_use_item
+                item_name = self._item_label(item)[:24] if item else "None"
+                pyxel.text(cx, cy, "== Use Item ==", COL_YELLOW)
+                pyxel.text(cx, cy + 10, item_name, COL_PEACH)
+                targets = self._item_targets(item) if item else []
+                if not targets:
+                    pyxel.text(cx, cy + 28, "No targets.", COL_DARK_GRAY)
+                for i, target in enumerate(targets):
+                    cursor = ">" if i == self.inv_target_idx else " "
+                    can_use = self._can_use_item_on(item, target)
+                    col = COL_YELLOW if i == self.inv_target_idx and can_use else (
+                        COL_WHITE if can_use else COL_DARK_GRAY)
+                    pyxel.text(cx, cy + 28 + i * 18,
+                               f"{cursor} {target.name[:8]}", col)
+                    pyxel.text(cx + 72, cy + 28 + i * 18,
+                               f"HP:{target.hp}/{target.max_hp}", col)
+                    pyxel.text(cx + 136, cy + 28 + i * 18,
+                               f"MP:{target.mp}/{target.max_mp}", col)
+                    icons = []
+                    if target.status_effects.get("poison", 0) > 0:
+                        icons.append("P")
+                    if target.status_effects.get("stun", 0) > 0:
+                        icons.append("S")
+                    if icons:
+                        pyxel.text(cx + 190, cy + 28 + i * 18,
+                                   "[" + "".join(icons) + "]", COL_ORANGE)
+                pyxel.text(cx, cy + ch - 8, "Z:Use  X:Cancel", COL_DARK_GRAY)
+            self.sub_win.draw(_target_content)
 
     def _draw_dungeon_skill(self):
         def _content(cx, cy, cw, ch):
@@ -2374,7 +2691,11 @@ class App:
         pyxel.text(px + 4, py + ph - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
 
     def _draw_title(self):
-        pyxel.cls(COL_BLACK)
+        if self.assets_loaded:
+            pyxel.blt(0, 0, 1, 0, 0, SCREEN_W, SCREEN_H)
+        else:
+            pyxel.cls(COL_BLACK)
+        pyxel.rect(0, 46, SCREEN_W, 92, COL_BLACK)
         title = "D E L V O K E R"
         pyxel.text((SCREEN_W - len(title) * 4) // 2, 55, title, COL_YELLOW)
         sub = "Retro Dungeon Hack & Slash"
@@ -2387,6 +2708,35 @@ class App:
             x = (SCREEN_W - (len(opt) + 2) * 4) // 2
             pyxel.text(x, 108 + i * 16, f"{cur} {opt}", col)
         pyxel.text(4, SCREEN_H - 14, "Z/Space:Select  Q:Quit", COL_DARK_GRAY)
+
+    def _draw_name_input(self):
+        if self.assets_loaded:
+            pyxel.blt(0, 0, 1, 0, 0, SCREEN_W, SCREEN_H)
+        else:
+            pyxel.cls(COL_BLACK)
+        pyxel.rect(0, 18, SCREEN_W, 206, COL_BLACK)
+        hdr = "ENTER YOUR NAME"
+        pyxel.text((SCREEN_W - len(hdr) * 4) // 2, 28, hdr, COL_YELLOW)
+        name = self.name_input_text or "_"
+        shown = f"[{name:<8}]"
+        pyxel.text((SCREEN_W - len(shown) * 4) // 2, 48, shown, COL_WHITE)
+
+        items = list(_NAME_INPUT_CHARS) + _NAME_INPUT_ACTIONS
+        start_x = 52
+        start_y = 76
+        cell_w = 20
+        cell_h = 16
+        for i, item in enumerate(items):
+            col = COL_YELLOW if i == self.name_input_cursor else COL_WHITE
+            x = start_x + (i % _NAME_INPUT_COLUMNS) * cell_w
+            y = start_y + (i // _NAME_INPUT_COLUMNS) * cell_h
+            if i == self.name_input_cursor:
+                pyxel.rectb(x - 3, y - 3, cell_w - 2, 12, COL_YELLOW)
+            pyxel.text(x, y, item, col)
+
+        pyxel.text(24, 184, "Arrows:Move  Z:Pick/OK  X:Del", COL_LIGHT_GRAY)
+        pyxel.text(24, 196, "Blank OK starts as HERO", COL_DARK_GRAY)
+        pyxel.text(24, 208, "Job: Porter", COL_GREEN)
 
     def _draw_job_select(self):
         pyxel.cls(COL_BLACK)
@@ -2404,7 +2754,11 @@ class App:
         pyxel.text(4, SCREEN_H - 14, "Z/Space:Select", COL_DARK_GRAY)
 
     def _draw_ending(self):
-        pyxel.cls(COL_BLACK)
+        if self.assets_loaded:
+            pyxel.blt(0, 0, 2, 0, 0, SCREEN_W, SCREEN_H)
+        else:
+            pyxel.cls(COL_BLACK)
+        pyxel.rect(0, 32, SCREEN_W, 148, COL_BLACK)
         p = self.player
         lines = [
             ("CONGRATULATIONS!", COL_YELLOW, 40),
@@ -2547,32 +2901,41 @@ class App:
 
             p = self.player
             if self.shop_mode == "buy":
-                for i, key in enumerate(SHOP_KEYS):
-                    item = ITEM_CATALOG[key]
-                    col = COL_YELLOW if i == self.shop_idx else COL_WHITE
-                    cursor = ">" if i == self.shop_idx else " "
+                if not self.shop_stock:
+                    pyxel.text(cx, row_y, "-- No Stock --", COL_DARK_GRAY)
+                for i, item in enumerate(self.shop_stock[:SHOP_STOCK_SIZE]):
+                    col_i = i % 3
+                    row_i = i // 3
+                    cell_x = cx + col_i * 76
+                    cell_y = row_y + row_i * 24
+                    selected = i == self.shop_idx
+                    border_col = COL_YELLOW if selected else COL_DARK_GRAY
                     affordable = p.gold >= item.value
-                    name_col = col if affordable else COL_DARK_GRAY
-                    pyxel.text(cx,           row_y + i * 10,
-                               f"{cursor} {item.name[:18]}", name_col)
-                    pyxel.text(cx + cw - 42, row_y + i * 10, f"{item.value}G",
+                    name_col = self._item_color(item, selected, affordable)
+                    pyxel.rectb(cell_x, cell_y, 72, 21, border_col)
+                    cursor = ">" if selected else " "
+                    pyxel.text(cell_x + 2, cell_y + 3,
+                               f"{cursor}{self._item_label(item)[:14]}", name_col)
+                    pyxel.text(cell_x + 2, cell_y + 12, f"{item.value}G",
                                COL_YELLOW if affordable else COL_DARK_GRAY)
                 if len(p.inventory) >= INV_MAX:
                     pyxel.text(cx + 60, cy + ch - 16, "Bag Full!", COL_RED)
-                pyxel.text(cx, cy + ch - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
+                pyxel.text(cx + 118, cy + ch - 16,
+                           f"Restock:{self.steps_to_restock}", COL_LIGHT_GRAY)
+                pyxel.text(cx, cy + ch - 8, "Z:Buy  X:Back  <>:Switch", COL_DARK_GRAY)
             else:
                 inv = p.inventory
                 if not inv:
                     pyxel.text(cx, row_y, "-- Empty --", COL_DARK_GRAY)
                 else:
                     for i, item in enumerate(inv):
-                        equipped = (item is p.weapon or item is p.armor)
-                        col = COL_DARK_GRAY if equipped else (COL_YELLOW if i == self.shop_idx else COL_WHITE)
+                        equipped = (item is p.weapon or item is p.armor or item is p.accessory)
+                        col = self._item_color(item, i == self.shop_idx, not equipped)
                         cursor = ">" if i == self.shop_idx else " "
                         sell_price = int(item.value * 0.3)
                         tag = "[E]" if equipped else f"{sell_price}G"
                         pyxel.text(cx,           row_y + i * 10,
-                                   f"{cursor} {item.name[:16]}", col)
+                                   f"{cursor} {self._item_label(item)[:16]}", col)
                         pyxel.text(cx + cw - 42, row_y + i * 10, tag, col)
                 pyxel.text(cx, cy + ch - 8, "Z:Sell  X:Back", COL_DARK_GRAY)
 
@@ -2632,11 +2995,11 @@ class App:
         self.sub_win.draw(_content)
 
     def draw_3d_view(self):
-        _draw_3d_view(self.wall_at)
+        _draw_3d_view(self.wall_at, self.assets_loaded, self.dungeon_floor)
 
     def draw_npcs(self):
         for npc in self.npcs:
-            npc.draw(self.px, self.py, self.dir, is_wall)
+            npc.draw(self.px, self.py, self.dir, is_wall, self.assets_loaded)
 
     def draw_minimap(self):
         if _dungeon_map is None:
@@ -2672,32 +3035,66 @@ class App:
                     col = COL_DARK_GRAY
                 pyxel.pset(ox + tx, oy + ty, col)
 
+    def _draw_stat_bar(self, x, y, w, value, max_value, col):
+        pyxel.rect(x, y, w, 3, COL_DARK_GRAY)
+        fill = 0 if max_value <= 0 else int(w * max(0, value) / max_value)
+        pyxel.rect(x, y, min(w, fill), 3, col)
+
+    def _short_item_name(self, item, limit):
+        if not item:
+            return "None"
+        return self._item_label(item).replace(" ", "")[:limit]
+
+    def _draw_party_card(self, member, x, y, w, h, role, border_col):
+        pyxel.rect(x, y, w, h, COL_BLACK)
+        pyxel.rectb(x, y, w, h, border_col)
+        if member is None:
+            pyxel.text(x + 8, y + 24, "Empty", COL_DARK_GRAY)
+            return
+        hp_rate = member.hp / member.max_hp if member.max_hp > 0 else 0
+        hp_col = COL_GREEN if hp_rate > 0.4 else (COL_ORANGE if hp_rate > 0.2 else COL_RED)
+        name_limit = max(4, (w - len(role) * 4 - 10) // 4)
+        name = member.name[:name_limit]
+        pyxel.text(x + 3, y + 3, name, COL_WHITE)
+        pyxel.text(x + w - len(role) * 4 - 3, y + 3, role, border_col)
+        pyxel.text(x + 3, y + 13, f"HP {member.hp}/{member.max_hp}", hp_col)
+        self._draw_stat_bar(x + 3, y + 22, w - 6, member.hp, member.max_hp, hp_col)
+        max_mp = getattr(member, "total_max_mp", member.max_mp)
+        pyxel.text(x + 3, y + 27, f"MP {member.mp}/{max_mp}", COL_BLUE)
+        self._draw_stat_bar(x + 3, y + 36, w - 6, member.mp, max_mp, COL_BLUE)
+        equip_limit = max(3, min(6, (w - 8) // 8))
+        wp = self._short_item_name(getattr(member, "weapon", None), equip_limit)
+        ar = self._short_item_name(getattr(member, "armor", None), equip_limit)
+        pyxel.text(x + 3, y + 41, f"W:{wp}", COL_PEACH)
+        pyxel.text(x + 3, y + 50, f"A:{ar}", COL_PEACH)
+        icon_x = x + w - 28
+        if member.status_effects.get("poison", 0) > 0:
+            pyxel.text(icon_x, y + 50, "[P]", COL_GREEN)
+            icon_x += 13
+        if member.status_effects.get("stun", 0) > 0:
+            pyxel.text(icon_x, y + 50, "[S]", COL_YELLOW)
+
     def draw_status(self):
         pyxel.rect(0, STATUS_Y, SCREEN_W, SCREEN_H - STATUS_Y, COL_BLACK)
         pyxel.line(0, STATUS_Y, SCREEN_W - 1, STATUS_Y, COL_DARK_GRAY)
-        p = self.player
-        pyxel.text(4, STATUS_Y + 4,
-                   f"{p.name}  Lv{p.level} {p.job.name}  HP:{p.hp}/{p.max_hp}",
-                   COL_WHITE)
-        gold_str = f"Gold:{p.gold}G"
-        pyxel.text(SCREEN_W - 4 - len(gold_str) * 4,
-                   STATUS_Y + 4, gold_str, COL_YELLOW)
-        status_info = f"EXP:{p.exp}/{p.exp_to_next}"
-        if p.bonus_points > 0:
-            status_info += f"  BP:{p.bonus_points}"
-        pyxel.text(4, STATUS_Y + 16, status_info, COL_YELLOW)
-        pyxel.text(4, STATUS_Y + 28,
-                   f"({self.px},{self.py}) {DIR_NAMES[self.dir]}",
-                   COL_LIGHT_GRAY)
-        floor_str = f"B{self.dungeon_floor}F"
-        pyxel.text(SCREEN_W - 4 - len(floor_str) * 4,
-                   STATUS_Y + 28, floor_str, COL_YELLOW)
-        wp_name  = p.weapon.label()[:16]    if p.weapon    else "None"
-        ar_name  = p.armor.label()[:16]     if p.armor     else "None"
-        acc_name = p.accessory.label()[:12] if p.accessory else "None"
-        pyxel.text(4, STATUS_Y + 40, f"W:{wp_name}  A:{ar_name}", COL_PEACH)
-        pyxel.text(4, STATUS_Y + 52, f"Acc:{acc_name}", COL_PEACH)
-        pyxel.text(4, STATUS_Y + 64,
+        card_y = STATUS_Y + 2
+        card_h = 60
+        card_count = Party.MAX_SIZE
+        card_w = SCREEN_W // card_count
+        members = self.party.members[:card_count]
+        while len(members) < card_count:
+            members.append(None)
+        for i, member in enumerate(members):
+            x = i * card_w
+            w = card_w if i < card_count - 1 else SCREEN_W - x
+            role = "[REAR]" if i == 0 else "[FRONT]"
+            border = COL_PEACH if i == 0 else COL_LIGHT_GRAY
+            self._draw_party_card(member, x + 1, card_y, w - 2, card_h, role, border)
+        meta = f"B{self.dungeon_floor}F ({self.px},{self.py}) {DIR_NAMES[self.dir]}  Gold:{self.player.gold}G"
+        if self.player.bonus_points > 0:
+            meta += f" BP:{self.player.bonus_points}"
+        pyxel.text(4, STATUS_Y + 64, meta[:62], COL_YELLOW)
+        pyxel.text(4, STATUS_Y + 72,
                    "Arrow:Move  T:Town  I:Item  S:Skill  Q:Quit", COL_DARK_GRAY)
 
 

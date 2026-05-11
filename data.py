@@ -68,37 +68,70 @@ class WeaponItem(Item):
                           self.attribute, self.weight_class)
 
 
+def _rarity_from_enchants(prefix=None, suffix=None, genesis=False):
+    if genesis:
+        return "genesis"
+    count = (1 if prefix else 0) + (1 if suffix else 0)
+    if count == 0:
+        return "normal"
+    strong_prefix = prefix and prefix.get("name") in ("Master",)
+    if count == 2:
+        return "legend" if strong_prefix else "epic"
+    return "rare"
+
+
+def _rarity_value(base_value, rarity):
+    mult = {
+        "normal": 1.0,
+        "rare": 1.5,
+        "epic": 2.5,
+        "legend": 4.0,
+        "genesis": 8.0,
+    }.get(rarity, 1.0)
+    return max(base_value, int(base_value * mult))
+
+
 class EnchantedWeapon(WeaponItem):
     """WeaponItemにエンチャント（接頭辞・接尾辞）を付与した派生クラス。"""
 
-    def __init__(self, base: WeaponItem, prefix=None, suffix=None):
-        super().__init__(
-            base.name,
-            base.dice_count + (prefix["dice_count_mod"] if prefix else 0),
-            base.dice_sides + (prefix["dice_sides_mod"] if prefix else 0),
-            base.static_bonus + (prefix["static_bonus_mod"] if prefix else 0),
-            base.enchant_bonus,
-            base.value,
-            weight_class=getattr(base, "weight_class", "light"),
-        )
+    def __init__(self, base: WeaponItem, prefix=None, suffix=None, genesis=False):
         self.prefix = prefix   # dict | None
         self.suffix = suffix   # dict | None
-        self.attribute = (suffix["attribute"] if suffix else None) or base.attribute
-        self._base_name = base.name
+        self.genesis = genesis
+        self._base_name = getattr(base, "_base_name", base.name)
+        self._base_dc = getattr(base, "_base_dc", base.dice_count)
+        self._base_ds = getattr(base, "_base_ds", base.dice_sides)
+        self._base_sb = getattr(base, "_base_sb", base.static_bonus)
+        self._base_enchant_bonus = getattr(base, "_base_enchant_bonus", base.enchant_bonus)
+        self._base_value = getattr(base, "_base_value", base.value)
+        self._base_attribute = getattr(base, "_base_attribute", base.attribute)
+        dc = self._base_dc + (prefix["dice_count_mod"] if prefix else 0)
+        ds = self._base_ds + (prefix["dice_sides_mod"] if prefix else 0)
+        sb = self._base_sb + (prefix["static_bonus_mod"] if prefix else 0)
+        if genesis:
+            dc = self._base_dc + 2
+            ds = self._base_ds + 4
+            sb = self._base_sb + 8
+        rarity = _rarity_from_enchants(prefix, suffix, genesis)
+        super().__init__(
+            self._base_name, max(1, dc), max(1, ds), sb, self._base_enchant_bonus,
+            _rarity_value(self._base_value, rarity),
+            weight_class=getattr(base, "weight_class", "light"),
+        )
+        self.attribute = (suffix["attribute"] if suffix else None) or self._base_attribute
 
     @property
     def rarity(self):
-        cursed = self.prefix and self.prefix.get("dice_count_mod", 0) < 0
-        if cursed:
-            return "cursed"
-        both = self.prefix and self.suffix
-        if both:
-            return "rare"
-        if self.prefix or self.suffix:
-            return "magic"
-        return "common"
+        return _rarity_from_enchants(self.prefix, self.suffix, self.genesis)
+
+    @property
+    def is_cursed(self):
+        return bool(self.prefix and self.prefix.get("dice_count_mod", 0) < 0)
 
     def label(self):
+        if self.genesis:
+            lo, hi = self.dmg_range()
+            return f"Genesis {self._base_name} ({lo}-{hi})"
         parts = []
         if self.prefix:
             parts.append(self.prefix["name"])
@@ -109,9 +142,11 @@ class EnchantedWeapon(WeaponItem):
         return f"{''.join(parts) if self.prefix or self.suffix else self._base_name} ({lo}-{hi})"
 
     def clone(self):
-        base = WeaponItem(self._base_name, self.dice_count, self.dice_sides,
-                          self.static_bonus, self.enchant_bonus, self.value)
-        return EnchantedWeapon(base, self.prefix, self.suffix)
+        base = WeaponItem(self._base_name, self._base_dc, self._base_ds,
+                          self._base_sb, self._base_enchant_bonus,
+                          self._base_value, self._base_attribute,
+                          self.weight_class)
+        return EnchantedWeapon(base, self.prefix, self.suffix, self.genesis)
 
 
 class ArmorItem(Item):
@@ -128,26 +163,33 @@ class ArmorItem(Item):
 class EnchantedArmor(ArmorItem):
     """ArmorItemに接頭辞（防御値変化）・接尾辞（属性耐性）を付与した派生クラス。"""
 
-    def __init__(self, base: ArmorItem, prefix=None, suffix=None):
-        bonus_mod = prefix["def_bonus_mod"] if prefix else 0
-        super().__init__(
-            base.name,
-            max(0, base.def_bonus + bonus_mod),
-            base.value,
-            getattr(base, "weight_class", "light"),
-        )
+    def __init__(self, base: ArmorItem, prefix=None, suffix=None, genesis=False):
         self.prefix = prefix
         self.suffix = suffix
+        self.genesis = genesis
+        self._base_name = getattr(base, "_base_name", base.name)
+        self._base_def = getattr(base, "_base_def", base.def_bonus)
+        self._base_value = getattr(base, "_base_value", base.value)
+        bonus_mod = prefix["def_bonus_mod"] if prefix else 0
+        def_bonus = max(0, self._base_def + bonus_mod)
+        if genesis:
+            def_bonus = self._base_def + 8
+        rarity = _rarity_from_enchants(prefix, suffix, genesis)
+        super().__init__(
+            self._base_name,
+            def_bonus,
+            _rarity_value(self._base_value, rarity),
+            getattr(base, "weight_class", "light"),
+        )
         self.attribute = suffix["attribute"] if suffix else None
-        self._base_name = base.name
 
     @property
     def rarity(self):
-        if self.prefix or self.suffix:
-            return "magic"
-        return "common"
+        return _rarity_from_enchants(self.prefix, self.suffix, self.genesis)
 
     def label(self):
+        if self.genesis:
+            return f"Genesis {self._base_name} (DEF+{self.def_bonus})"
         parts = []
         if self.prefix:
             parts.append(self.prefix["name"])
@@ -158,8 +200,9 @@ class EnchantedArmor(ArmorItem):
         return f"{name} (DEF+{self.def_bonus})"
 
     def clone(self):
-        base = ArmorItem(self._base_name, self.def_bonus, self.value)
-        return EnchantedArmor(base, self.prefix, self.suffix)
+        base = ArmorItem(self._base_name, self._base_def, self._base_value,
+                         self.weight_class)
+        return EnchantedArmor(base, self.prefix, self.suffix, self.genesis)
 
 
 class ConsumableItem(Item):
@@ -336,6 +379,8 @@ JOB_SKILLS: dict = {
 def make_enchanted_armor(base_key: str) -> EnchantedArmor:
     """ベース防具にウェイト抽選でエンチャントを付与したEnchantedArmorを返す。"""
     base = ITEM_CATALOG[base_key]
+    if random.random() < 0.005:
+        return EnchantedArmor(base, genesis=True)
 
     def _pick(pool: dict):
         keys = list(pool.keys())
@@ -360,6 +405,8 @@ def make_enchanted_weapon(base_key: str) -> EnchantedWeapon:
     """ベース武器にウェイト抽選でエンチャントを付与したEnchantedWeaponを返す。
     接頭辞・接尾辞ともに付与なし（Common）になることもある。"""
     base = ITEM_CATALOG[base_key]
+    if random.random() < 0.005:
+        return EnchantedWeapon(base, genesis=True)
 
     def _pick(pool: dict):
         keys = list(pool.keys())
@@ -494,9 +541,9 @@ class NPCMember(Status):
 
 
 class Party:
-    """プレイヤー1名 + 臨時NPC最大2名を管理するパーティクラス。"""
+    """プレイヤー1名 + 臨時NPC最大3名を管理するパーティクラス。"""
 
-    MAX_SIZE = 3
+    MAX_SIZE = 4
 
     def __init__(self, player):
         self.members = [player]

@@ -78,6 +78,8 @@ STATE_DUNGEON_SHOP       = 18
 STATE_TITLE              = 19
 STATE_JOB_SELECT         = 20
 STATE_LOG_VIEW           = 23
+STATE_INV_TARGET_SELECT  = 24
+STATE_NAME_INPUT         = 25
 
 # Tile types
 TILE_FLOOR       = 0
@@ -98,12 +100,16 @@ SAVE_FILE = "delvoker_save.json"
 INV_MAX       = 12
 SHOP_KEYS     = [
     "short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
+    "steel_sword", "mithril_sword", "steel_plate",
     "herb", "potion", "ether", "antidote", "scroll_mapping",
     "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return",
     "lucky_ring", "mana_charm", "rabbits_foot", "emergency_kit",
 ]
 MERCHANT_KEYS  = ["elixir", "potion", "ether", "antidote", "holy_scroll", "grimoire_heal"]
 SHOP_COMMANDS  = ["Buy", "Sell"]
+SHOP_STOCK_SIZE = 15
+SHOP_RESTOCK_STEPS = 100
+SHOP_RARE_SLOT_RATE = 0.08
 
 # Battle / progression
 PROMOTION_COST = 1000
@@ -124,7 +130,7 @@ HOME_RENOVATE_SLOTS = 5
 
 # BGM zone mapping: state -> music index (0=town, 1=dungeon, 2=battle, -1=stop)
 _BGM_ZONES = {
-    STATE_TITLE: 0,        STATE_JOB_SELECT: 0,
+    STATE_TITLE: 0,        STATE_JOB_SELECT: 0,      STATE_NAME_INPUT: 0,
     STATE_TOWN: 0,         STATE_TOWN_SUB: 0,        STATE_GUILD: 0,
     STATE_STAT_ALLOC: 0,   STATE_SHOP: 0,            STATE_HOME: 0,    STATE_REVIVE: 0,
     STATE_DUNGEON: 1,      STATE_DUNGEON_SKILL: 1,   STATE_DUNGEON_SHOP: 1,

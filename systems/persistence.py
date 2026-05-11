@@ -11,26 +11,36 @@ def serialize_item(item):
         prefix = item.prefix
         return {"kind": "enchanted_weapon",
                 "base_name": item._base_name,
-                "base_dc": item.dice_count - (prefix["dice_count_mod"] if prefix else 0),
-                "base_ds": item.dice_sides - (prefix["dice_sides_mod"] if prefix else 0),
-                "base_sb": item.static_bonus - (prefix["static_bonus_mod"] if prefix else 0),
-                "enchant_bonus": item.enchant_bonus, "value": item.value,
-                "prefix": prefix, "suffix": item.suffix}
+                "base_dc": getattr(item, "_base_dc", item.dice_count - (prefix["dice_count_mod"] if prefix else 0)),
+                "base_ds": getattr(item, "_base_ds", item.dice_sides - (prefix["dice_sides_mod"] if prefix else 0)),
+                "base_sb": getattr(item, "_base_sb", item.static_bonus - (prefix["static_bonus_mod"] if prefix else 0)),
+                "enchant_bonus": getattr(item, "_base_enchant_bonus", item.enchant_bonus),
+                "value": getattr(item, "_base_value", item.value),
+                "attribute": getattr(item, "_base_attribute", item.attribute),
+                "weight_class": getattr(item, "weight_class", "light"),
+                "prefix": prefix, "suffix": item.suffix,
+                "genesis": getattr(item, "genesis", False)}
     if isinstance(item, WeaponItem):
         return {"kind": "weapon",
                 "name": item.name, "dice_count": item.dice_count,
                 "dice_sides": item.dice_sides, "static_bonus": item.static_bonus,
                 "enchant_bonus": item.enchant_bonus, "value": item.value,
-                "attribute": item.attribute}
+                "attribute": item.attribute,
+                "weight_class": getattr(item, "weight_class", "light")}
     if isinstance(item, EnchantedArmor):
         prefix = item.prefix
         return {"kind": "enchanted_armor",
                 "base_name": item._base_name,
-                "base_def": item.def_bonus - (prefix["def_bonus_mod"] if prefix else 0),
-                "value": item.value, "prefix": prefix, "suffix": item.suffix}
+                "base_def": getattr(item, "_base_def", item.def_bonus - (prefix["def_bonus_mod"] if prefix else 0)),
+                "value": getattr(item, "_base_value", item.value),
+                "weight_class": getattr(item, "weight_class", "light"),
+                "prefix": prefix, "suffix": item.suffix,
+                "genesis": getattr(item, "genesis", False)}
     if isinstance(item, ArmorItem):
         return {"kind": "armor",
-                "name": item.name, "def_bonus": item.def_bonus, "value": item.value}
+                "name": item.name, "def_bonus": item.def_bonus,
+                "value": item.value,
+                "weight_class": getattr(item, "weight_class", "light")}
     if isinstance(item, GrimoireItem):
         return {"kind": "grimoire",
                 "name": item.name, "skill_name": item.skill_name,
@@ -50,17 +60,24 @@ def deserialize_item(d):
     k = d.get("kind", "consumable")
     if k == "enchanted_weapon":
         base = WeaponItem(d["base_name"], d["base_dc"], d["base_ds"],
-                          d.get("base_sb", 0), d.get("enchant_bonus", 0), d.get("value", 0))
-        return EnchantedWeapon(base, d.get("prefix"), d.get("suffix"))
+                          d.get("base_sb", 0), d.get("enchant_bonus", 0),
+                          d.get("value", 0), d.get("attribute"),
+                          d.get("weight_class", "light"))
+        return EnchantedWeapon(base, d.get("prefix"), d.get("suffix"),
+                               d.get("genesis", False))
     if k == "weapon":
         return WeaponItem(d["name"], d["dice_count"], d["dice_sides"],
                           d.get("static_bonus", 0), d.get("enchant_bonus", 0),
-                          d.get("value", 0), d.get("attribute"))
+                          d.get("value", 0), d.get("attribute"),
+                          d.get("weight_class", "light"))
     if k == "enchanted_armor":
-        base = ArmorItem(d["base_name"], d["base_def"], d.get("value", 0))
-        return EnchantedArmor(base, d.get("prefix"), d.get("suffix"))
+        base = ArmorItem(d["base_name"], d["base_def"], d.get("value", 0),
+                         d.get("weight_class", "light"))
+        return EnchantedArmor(base, d.get("prefix"), d.get("suffix"),
+                              d.get("genesis", False))
     if k == "armor":
-        return ArmorItem(d["name"], d["def_bonus"], d.get("value", 0))
+        return ArmorItem(d["name"], d["def_bonus"], d.get("value", 0),
+                         d.get("weight_class", "light"))
     if k == "grimoire":
         return GrimoireItem(d["name"], d["skill_name"], d.get("mp_cost", 5),
                             d.get("effect_type", "attack"), d.get("power", 10),
@@ -74,6 +91,7 @@ def deserialize_item(d):
 
 def save_game(player, unlocked_jobs, game_cleared, bestiary=None, filepath=SAVE_FILE):
     data = {
+        "player_name": player.name,
         "gold": player.gold,
         "warehouse": [serialize_item(it) for it in player.warehouse],
         "warehouse_max": player.warehouse_max,
