@@ -1,6 +1,6 @@
 import random
 import pyxel
-from data import NPC_TYPES
+from data import NPC_TYPES, ENEMY_CATALOG
 
 NPC_IDLE   = 0
 NPC_WANDER = 1
@@ -15,6 +15,19 @@ _FRAMES = [
     (93,  64,  163, 112),
     (105, 72,  150, 103),
 ]
+
+
+def _draw_scaled_sprite(src_u, src_v, dst_x, dst_y, dst_w, dst_h, transparent=0):
+    img = pyxel.images[0]
+    dst_w = max(1, dst_w)
+    dst_h = max(1, dst_h)
+    for dy in range(dst_h):
+        sy = src_v + dy * 32 // dst_h
+        for dx in range(dst_w):
+            sx = src_u + dx * 32 // dst_w
+            col = img.pget(sx, sy)
+            if col != transparent:
+                pyxel.pset(dst_x + dx, dst_y + dy, col)
 
 
 class NPC:
@@ -76,7 +89,7 @@ class NPC:
     def at_player(self, px, py):
         return self.x == px and self.y == py
 
-    def draw(self, px, py, player_dir, is_wall_fn):
+    def draw(self, px, py, player_dir, is_wall_fn, assets_loaded=False):
         dx, dy = _DIR_VECTORS[player_dir]
         rx, ry = _DIR_VECTORS[(player_dir + 1) % 4]
 
@@ -102,7 +115,22 @@ class NPC:
         nx = cx - nw // 2
         ny = cy - nh // 2 + fh // 10
 
-        pyxel.rect(nx, ny, nw, nh, self.color)
+        edef = ENEMY_CATALOG.get(self.enemy_key)
+        if assets_loaded and edef is not None:
+            src_u = getattr(edef, "sprite_u", None)
+            src_v = getattr(edef, "sprite_v", None)
+            if src_u is not None and src_v is not None:
+                sprite_w = max(8, nw)
+                sprite_h = max(8, nh)
+                sx = cx - sprite_w // 2
+                sy = cy - sprite_h // 2 + fh // 10
+                _draw_scaled_sprite(src_u, src_v, sx, sy, sprite_w, sprite_h, 0)
+                ny = sy
+            else:
+                pyxel.rect(nx, ny, nw, nh, self.color)
+        else:
+            pyxel.rect(nx, ny, nw, nh, self.color)
+
         label = self.name[:6]
         lx = cx - len(label) * 2
         pyxel.text(lx, ny - 8, label, 7)

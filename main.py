@@ -15,7 +15,7 @@ from constants import (
     STATE_BATTLE_TARGET_PART, STATE_BATTLE_TARGET, STATE_REVIVE, STATE_INV_GIVE_NPC,
     STATE_HOME, STATE_ENDING, STATE_DUNGEON_SKILL, STATE_DUNGEON_SHOP,
     STATE_TITLE, STATE_JOB_SELECT, STATE_BATTLE_SKILL, STATE_LOG_VIEW,
-    STATE_INV_TARGET_SELECT,
+    STATE_INV_TARGET_SELECT, STATE_NAME_INPUT,
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
     TILE_FOUNTAIN, TILE_MERCHANT,
@@ -57,6 +57,11 @@ _SHOP_TIERS = [
      "antidote", "grimoire_ice", "grimoire_poison", "grimoire_return",
      "rabbits_foot", "emergency_kit"],
 ]
+
+_NAME_INPUT_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+_NAME_INPUT_ACTIONS = ["OK", "DEL"]
+_NAME_INPUT_COLUMNS = 8
+_NAME_MAX_LEN = 8
 
 
 def _drop_pools(floor):
@@ -266,6 +271,9 @@ class App:
         # Title / job select
         self.title_idx = 0
         self.job_select_idx = 0
+        self.player_name = "HERO"
+        self.name_input_text = "HERO"
+        self.name_input_cursor = 0
         self.unlocked_jobs = ["porter"]
 
         # Dungeon merchant shop
@@ -409,7 +417,7 @@ class App:
 
     def _set_state(self, new_state):
         self.state = new_state
-        if new_state in (STATE_TITLE, STATE_JOB_SELECT):
+        if new_state in (STATE_TITLE, STATE_JOB_SELECT, STATE_NAME_INPUT):
             self.town_win.close()
             self.status_win.close()
             self.sub_win.close()
@@ -641,14 +649,67 @@ class App:
             self.title_idx = (self.title_idx + 1) % len(options)
         if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
             sel = options[self.title_idx]
-            self.player = Player()
             if sel == "Continue":
+                self.player = Player("porter")
                 self.load_data()
+                self._grant_job_skill("porter")
+                self.party = Party(self.player)
+                demo_npc = NPCMember("warrior", "Gard", "reckless")
+                self.party.add(demo_npc)
+                self._set_state(STATE_TOWN)
             else:
-                self.unlocked_jobs = ["warrior"]
+                self.player_name = "HERO"
+                self.name_input_text = "HERO"
+                self.name_input_cursor = 0
+                self.unlocked_jobs = ["porter"]
                 self.game_cleared = False
-            self.job_select_idx = 0
-            self._set_state(STATE_JOB_SELECT)
+                self._set_state(STATE_NAME_INPUT)
+
+    def _start_new_game(self):
+        self.player_name = (self.name_input_text or "HERO")[:_NAME_MAX_LEN]
+        self.player = Player("porter")
+        self.player.name = self.player_name
+        self._grant_job_skill("porter")
+        self.unlocked_jobs = ["porter"]
+        self.game_cleared = False
+        self.bestiary = {}
+        self.party = Party(self.player)
+        demo_npc = NPCMember("warrior", "Gard", "reckless")
+        self.party.add(demo_npc)
+        self._set_state(STATE_TOWN)
+
+    def _upd_name_input(self):
+        total = len(_NAME_INPUT_CHARS) + len(_NAME_INPUT_ACTIONS)
+        if pyxel.btnp(pyxel.KEY_LEFT):
+            self.name_input_cursor = (self.name_input_cursor - 1) % total
+        if pyxel.btnp(pyxel.KEY_RIGHT):
+            self.name_input_cursor = (self.name_input_cursor + 1) % total
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.name_input_cursor = (
+                self.name_input_cursor - _NAME_INPUT_COLUMNS) % total
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.name_input_cursor = (
+                self.name_input_cursor + _NAME_INPUT_COLUMNS) % total
+        if pyxel.btnp(pyxel.KEY_X):
+            if self.name_input_text:
+                self.name_input_text = self.name_input_text[:-1]
+            else:
+                self.name_input_text = "HERO"
+                self._set_state(STATE_TITLE)
+            return
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE):
+            idx = self.name_input_cursor
+            if idx < len(_NAME_INPUT_CHARS):
+                if len(self.name_input_text) < _NAME_MAX_LEN:
+                    self.name_input_text += _NAME_INPUT_CHARS[idx]
+            else:
+                action = _NAME_INPUT_ACTIONS[idx - len(_NAME_INPUT_CHARS)]
+                if action == "OK":
+                    if not self.name_input_text:
+                        self.name_input_text = "HERO"
+                    self._start_new_game()
+                elif action == "DEL" and self.name_input_text:
+                    self.name_input_text = self.name_input_text[:-1]
 
     def _upd_job_select(self):
         jobs = self.unlocked_jobs
@@ -1290,6 +1351,8 @@ class App:
 
         if self.state == STATE_TITLE:
             self._upd_title()
+        elif self.state == STATE_NAME_INPUT:
+            self._upd_name_input()
         elif self.state == STATE_JOB_SELECT:
             self._upd_job_select()
         elif self.state == STATE_TOWN:
@@ -2056,6 +2119,9 @@ class App:
         data = load_game()
         if not data:
             return
+        self.player.name = data.get("player_name", "HERO")
+        self.player_name = self.player.name
+        self.name_input_text = self.player.name
         self.player.gold = data.get("gold", 0)
         self.player.warehouse = [deserialize_item(d)
                                  for d in data.get("warehouse", [])]
@@ -2117,6 +2183,8 @@ class App:
         pyxel.cls(COL_NAVY)
         if self.state == STATE_TITLE:
             self._draw_title()
+        elif self.state == STATE_NAME_INPUT:
+            self._draw_name_input()
         elif self.state == STATE_JOB_SELECT:
             self._draw_job_select()
         elif self.state == STATE_TOWN:
@@ -2623,7 +2691,11 @@ class App:
         pyxel.text(px + 4, py + ph - 8, "Z:Buy  X:Back", COL_DARK_GRAY)
 
     def _draw_title(self):
-        pyxel.cls(COL_BLACK)
+        if self.assets_loaded:
+            pyxel.blt(0, 0, 1, 0, 0, SCREEN_W, SCREEN_H)
+        else:
+            pyxel.cls(COL_BLACK)
+        pyxel.rect(0, 46, SCREEN_W, 92, COL_BLACK)
         title = "D E L V O K E R"
         pyxel.text((SCREEN_W - len(title) * 4) // 2, 55, title, COL_YELLOW)
         sub = "Retro Dungeon Hack & Slash"
@@ -2636,6 +2708,35 @@ class App:
             x = (SCREEN_W - (len(opt) + 2) * 4) // 2
             pyxel.text(x, 108 + i * 16, f"{cur} {opt}", col)
         pyxel.text(4, SCREEN_H - 14, "Z/Space:Select  Q:Quit", COL_DARK_GRAY)
+
+    def _draw_name_input(self):
+        if self.assets_loaded:
+            pyxel.blt(0, 0, 1, 0, 0, SCREEN_W, SCREEN_H)
+        else:
+            pyxel.cls(COL_BLACK)
+        pyxel.rect(0, 18, SCREEN_W, 206, COL_BLACK)
+        hdr = "ENTER YOUR NAME"
+        pyxel.text((SCREEN_W - len(hdr) * 4) // 2, 28, hdr, COL_YELLOW)
+        name = self.name_input_text or "_"
+        shown = f"[{name:<8}]"
+        pyxel.text((SCREEN_W - len(shown) * 4) // 2, 48, shown, COL_WHITE)
+
+        items = list(_NAME_INPUT_CHARS) + _NAME_INPUT_ACTIONS
+        start_x = 52
+        start_y = 76
+        cell_w = 20
+        cell_h = 16
+        for i, item in enumerate(items):
+            col = COL_YELLOW if i == self.name_input_cursor else COL_WHITE
+            x = start_x + (i % _NAME_INPUT_COLUMNS) * cell_w
+            y = start_y + (i // _NAME_INPUT_COLUMNS) * cell_h
+            if i == self.name_input_cursor:
+                pyxel.rectb(x - 3, y - 3, cell_w - 2, 12, COL_YELLOW)
+            pyxel.text(x, y, item, col)
+
+        pyxel.text(24, 184, "Arrows:Move  Z:Pick/OK  X:Del", COL_LIGHT_GRAY)
+        pyxel.text(24, 196, "Blank OK starts as HERO", COL_DARK_GRAY)
+        pyxel.text(24, 208, "Job: Porter", COL_GREEN)
 
     def _draw_job_select(self):
         pyxel.cls(COL_BLACK)
@@ -2653,7 +2754,11 @@ class App:
         pyxel.text(4, SCREEN_H - 14, "Z/Space:Select", COL_DARK_GRAY)
 
     def _draw_ending(self):
-        pyxel.cls(COL_BLACK)
+        if self.assets_loaded:
+            pyxel.blt(0, 0, 2, 0, 0, SCREEN_W, SCREEN_H)
+        else:
+            pyxel.cls(COL_BLACK)
+        pyxel.rect(0, 32, SCREEN_W, 148, COL_BLACK)
         p = self.player
         lines = [
             ("CONGRATULATIONS!", COL_YELLOW, 40),
@@ -2890,11 +2995,11 @@ class App:
         self.sub_win.draw(_content)
 
     def draw_3d_view(self):
-        _draw_3d_view(self.wall_at)
+        _draw_3d_view(self.wall_at, self.assets_loaded, self.dungeon_floor)
 
     def draw_npcs(self):
         for npc in self.npcs:
-            npc.draw(self.px, self.py, self.dir, is_wall)
+            npc.draw(self.px, self.py, self.dir, is_wall, self.assets_loaded)
 
     def draw_minimap(self):
         if _dungeon_map is None:

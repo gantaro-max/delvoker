@@ -91,6 +91,7 @@ def deserialize_item(d):
 
 def save_game(player, unlocked_jobs, game_cleared, bestiary=None, filepath=SAVE_FILE):
     data = {
+        "player_name": player.name,
         "gold": player.gold,
         "warehouse": [serialize_item(it) for it in player.warehouse],
         "warehouse_max": player.warehouse_max,

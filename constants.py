@@ -79,6 +79,7 @@ STATE_TITLE              = 19
 STATE_JOB_SELECT         = 20
 STATE_LOG_VIEW           = 23
 STATE_INV_TARGET_SELECT  = 24
+STATE_NAME_INPUT         = 25
 
 # Tile types
 TILE_FLOOR       = 0
@@ -129,7 +130,7 @@ HOME_RENOVATE_SLOTS = 5
 
 # BGM zone mapping: state -> music index (0=town, 1=dungeon, 2=battle, -1=stop)
 _BGM_ZONES = {
-    STATE_TITLE: 0,        STATE_JOB_SELECT: 0,
+    STATE_TITLE: 0,        STATE_JOB_SELECT: 0,      STATE_NAME_INPUT: 0,
     STATE_TOWN: 0,         STATE_TOWN_SUB: 0,        STATE_GUILD: 0,
     STATE_STAT_ALLOC: 0,   STATE_SHOP: 0,            STATE_HOME: 0,    STATE_REVIVE: 0,
     STATE_DUNGEON: 1,      STATE_DUNGEON_SKILL: 1,   STATE_DUNGEON_SHOP: 1,
