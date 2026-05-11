@@ -1,0 +1,172 @@
+from pathlib import Path
+import argparse
+import pyxel
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "assets" / "source" / "image2"
+PYXRES = ROOT / "assets.pyxres"
+SRC_SIZE = 1254
+
+MONSTERS = [
+    ("monster_slime.png", 0, 0),
+    ("monster_bat.png", 32, 0),
+    ("monster_skeleton.png", 64, 0),
+    ("monster_goblin.png", 96, 0),
+    ("monster_orc_chief.png", 128, 0),
+    ("monster_revenant.png", 160, 0),
+    ("monster_wraith.png", 192, 0),
+    ("monster_golem.png", 224, 0),
+    ("monster_mimic.png", 0, 32),
+    ("monster_wyvern.png", 32, 32),
+    ("monster_dungeon_master.png", 64, 32),
+    ("monster_archdemon.png", 96, 32),
+]
+
+WALLS = [
+    ("wall_b1_b2.png", 0, 64, None),
+    ("wall_b3_b4.png", 8, 64, {3: 11, 5: 13}),
+    ("wall_b5_plus.png", 16, 64, {3: 2, 4: 8, 5: 1, 6: 13}),
+]
+
+BACKGROUNDS = [
+    ("background_title.png", 1),
+    ("background_ending.png", 2),
+]
+
+
+def _load_png(path: Path) -> pyxel.Image:
+    img = pyxel.Image(SRC_SIZE, SRC_SIZE)
+    img.load(0, 0, str(path.resolve()))
+    return img
+
+
+def _clear_rect(dst: pyxel.Image, x: int, y: int, w: int, h: int) -> None:
+    for yy in range(y, y + h):
+        for xx in range(x, x + w):
+            dst.pset(xx, yy, 0)
+
+
+def _monster_bbox(src: pyxel.Image, bg_col: int = 3) -> tuple[int, int, int, int]:
+    min_x = SRC_SIZE
+    min_y = SRC_SIZE
+    max_x = -1
+    max_y = -1
+    step = 2
+    for y in range(0, SRC_SIZE, step):
+        for x in range(0, SRC_SIZE, step):
+            if src.pget(x, y) != bg_col:
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x)
+                max_y = max(max_y, y)
+    if max_x < 0:
+        return (0, 0, SRC_SIZE - 1, SRC_SIZE - 1)
+    pad = 24
+    return (
+        max(0, min_x - pad),
+        max(0, min_y - pad),
+        min(SRC_SIZE - 1, max_x + pad),
+        min(SRC_SIZE - 1, max_y + pad),
+    )
+
+
+def _blit_scaled(
+    src: pyxel.Image,
+    dst: pyxel.Image,
+    src_box: tuple[int, int, int, int],
+    dst_x: int,
+    dst_y: int,
+    dst_w: int,
+    dst_h: int,
+    transparent: int | None = None,
+    remap: dict[int, int] | None = None,
+) -> None:
+    sx0, sy0, sx1, sy1 = src_box
+    sw = max(1, sx1 - sx0 + 1)
+    sh = max(1, sy1 - sy0 + 1)
+    for y in range(dst_h):
+        sy = sy0 + y * sh // dst_h
+        for x in range(dst_w):
+            sx = sx0 + x * sw // dst_w
+            col = src.pget(sx, sy)
+            if transparent is not None and col == transparent:
+                col = 0
+            if remap and col in remap:
+                col = remap[col]
+            dst.pset(dst_x + x, dst_y + y, col)
+
+
+def import_monsters() -> None:
+    dst = pyxel.images[0]
+    for filename, u, v in MONSTERS:
+        path = SOURCE / "monsters" / filename
+        if not path.exists():
+            print(f"[WARN] missing monster source: {path}")
+            continue
+        src = _load_png(path)
+        bg = src.pget(0, 0)
+        box = _monster_bbox(src, bg)
+        _clear_rect(dst, u, v, 32, 32)
+        _blit_scaled(src, dst, box, u, v, 32, 32, transparent=bg)
+        print(f"[OK] monster {filename} -> ({u},{v}) bg={bg} box={box}")
+
+
+def import_walls() -> None:
+    dst = pyxel.images[0]
+    for filename, u, v, remap in WALLS:
+        path = SOURCE / "walls" / filename
+        if not path.exists():
+            fallback = SOURCE / "walls" / "wall_source.png"
+            path = fallback if fallback.exists() else path
+        if not path.exists():
+            print(f"[WARN] missing wall source: {filename}")
+            continue
+        src = _load_png(path)
+        _blit_scaled(src, dst, (0, 0, SRC_SIZE - 1, SRC_SIZE - 1),
+                     u, v, 8, 8, remap=remap)
+        print(f"[OK] wall {path.name} -> ({u},{v})")
+
+
+def import_backgrounds() -> None:
+    for filename, bank in BACKGROUNDS:
+        path = SOURCE / "backgrounds" / filename
+        if not path.exists():
+            fallback = SOURCE / "backgrounds" / "background_source.png"
+            path = fallback if fallback.exists() else path
+        if not path.exists():
+            print(f"[WARN] missing background source: {filename}")
+            continue
+        src = _load_png(path)
+        dst = pyxel.images[bank]
+        _blit_scaled(src, dst, (0, 0, SRC_SIZE - 1, SRC_SIZE - 1),
+                     0, 0, 256, 256)
+        print(f"[OK] background {path.name} -> bank {bank}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--monsters", action="store_true")
+    parser.add_argument("--walls", action="store_true")
+    parser.add_argument("--backgrounds", action="store_true")
+    parser.add_argument("--all", action="store_true")
+    args = parser.parse_args()
+
+    pyxel.init(16, 16, display_scale=1)
+    if PYXRES.exists():
+        pyxel.load(str(PYXRES))
+
+    do_all = args.all or not (args.monsters or args.walls or args.backgrounds)
+    if do_all or args.monsters:
+        import_monsters()
+    if do_all or args.walls:
+        import_walls()
+    if do_all or args.backgrounds:
+        import_backgrounds()
+
+    pyxel.save(str(PYXRES))
+    print(f"[OK] saved {PYXRES}")
+
+
+if __name__ == "__main__":
+    main()
