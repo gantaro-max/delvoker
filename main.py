@@ -41,16 +41,21 @@ from npc import NPC
 
 # Tier-based drop pools keyed by floor range (1-indexed upper bound inclusive)
 _DROP_TIERS = [
-    (3,  ["old_dagger", "short_sword", "staff"],          ["leather_armor", "herb", "potion"]),
-    (6,  ["long_sword", "chain_mail"],                    ["potion", "ether", "grimoire_ice"]),
-    (10, ["steel_sword", "mithril_sword", "steel_plate"], ["ether", "grimoire_poison"]),
+    (3,  ["old_dagger", "short_sword", "staff", "hand_axe", "spear"],
+         ["padded_armor", "leather_armor", "hunter_cloak", "herb", "potion"]),
+    (6,  ["long_sword", "chain_mail", "war_hammer", "rune_staff", "scale_mail", "mage_robe"],
+         ["potion", "ether", "grimoire_ice"]),
+    (10, ["steel_sword", "mithril_sword", "steel_plate", "dragon_slayer", "shadow_blade", "dragon_mail", "aegis_plate"],
+         ["ether", "grimoire_poison"]),
 ]
 
 _SHOP_TIERS = [
-    ["short_sword", "staff", "leather_armor", "herb", "potion",
+    ["short_sword", "staff", "hand_axe", "spear",
+     "padded_armor", "leather_armor", "hunter_cloak", "herb", "potion",
      "antidote", "scroll_mapping", "grimoire_fire", "grimoire_heal",
      "lucky_ring", "emergency_kit"],
-    ["long_sword", "chain_mail", "potion", "ether", "antidote",
+    ["long_sword", "chain_mail", "war_hammer", "rune_staff",
+     "scale_mail", "mage_robe", "potion", "ether", "antidote",
      "scroll_mapping", "grimoire_heal", "grimoire_ice", "mana_charm",
      "emergency_kit"],
     ["steel_sword", "mithril_sword", "steel_plate", "potion", "ether",
@@ -73,9 +78,9 @@ def _drop_pools(floor):
 
 # Tier-based random encounter pools
 _ENCOUNTER_TIERS = [
-    (3,  ["slime", "bat", "goblin"]),
-    (6,  ["skeleton", "goblin", "wraith"]),
-    (10, ["golem", "wyvern", "wraith"]),
+    (3,  ["slime", "bat", "goblin", "kobold", "ooze"]),
+    (6,  ["skeleton", "goblin", "wraith", "cultist", "ice_hound"]),
+    (10, ["golem", "wyvern", "wraith", "dark_knight", "lich"]),
 ]
 
 
@@ -964,7 +969,7 @@ class App:
                 return max(1, int(base * 1.2))
         return base
 
-    def _get_enemy_target(self):
+    def _get_enemy_target(self, enemy_key=None):
         """Select attack target based on enemy AI type."""
         alive = self.party.alive
         if not alive:
@@ -972,8 +977,8 @@ class App:
         # Provoke forces all enemies to target the player
         if self.player.status_effects.get("provoke", 0) > 0:
             return self.player
-        edef = ENEMY_CATALOG.get(
-            self._current_enemy_key) if self._current_enemy_key else None
+        key = enemy_key or self._current_enemy_key
+        edef = ENEMY_CATALOG.get(key) if key else None
         ai_type = edef.ai_type if edef else "normal"
         if ai_type == "ranged":
             return max(alive, key=lambda m: m.agi)
@@ -1104,8 +1109,8 @@ class App:
                     f"Got: {drop_item.label() if hasattr(drop_item, 'label') else drop_item.name}!")
             else:
                 msgs.append("Bag full! Item lost.")
-        if enemy and self._current_enemy_key:
-            edef = ENEMY_CATALOG.get(self._current_enemy_key)
+        if enemy:
+            edef = ENEMY_CATALOG.get(getattr(enemy, "enemy_key", self._current_enemy_key))
             if edef:
                 for p in edef.parts:
                     if p["name"] in enemy.broken_parts and random.random() < 0.2:
@@ -1248,7 +1253,7 @@ class App:
             power_mult = 2 if self.telegraphing.pop(eid, False) else 1
 
             pyxel.play(0, 0)
-            target = self._get_enemy_target()
+            target = self._get_enemy_target(getattr(acting_enemy, "enemy_key", self._current_enemy_key))
             base_dmg = self._calc_dmg(acting_enemy.weapon, target.total_def, target)
             dmg = int(base_dmg * power_mult)
             # Provoke: 25% damage reduction while active
@@ -2441,6 +2446,18 @@ class App:
         sprite_v = getattr(enemy, "sprite_v", None)
         if sprite_u is None or sprite_v is None or sprite_u < 0 or sprite_v < 0:
             self._draw_enemy_fallback(enemy, x, y, "invalid_coords")
+            return False
+        img = pyxel.images[0]
+        has_pixels = False
+        for yy in range(sprite_v, min(sprite_v + 32, 256)):
+            for xx in range(sprite_u, min(sprite_u + 32, 256)):
+                if img.pget(xx, yy) != 0:
+                    has_pixels = True
+                    break
+            if has_pixels:
+                break
+        if not has_pixels:
+            self._draw_enemy_fallback(enemy, x, y, "empty_tile")
             return False
         try:
             for orig, new in self._enemy_palette_swaps(enemy):

@@ -100,7 +100,9 @@ SAVE_FILE = "delvoker_save.json"
 # Inventory / shop
 INV_MAX       = 12
 SHOP_KEYS     = [
-    "short_sword", "long_sword", "staff", "leather_armor", "chain_mail",
+    "short_sword", "long_sword", "staff", "hand_axe", "spear",
+    "leather_armor", "padded_armor", "hunter_cloak", "chain_mail",
+    "war_hammer", "rune_staff", "scale_mail", "mage_robe",
     "steel_sword", "mithril_sword", "steel_plate",
     "herb", "potion", "ether", "antidote", "scroll_mapping",
     "grimoire_fire", "grimoire_heal", "grimoire_ice", "grimoire_poison", "grimoire_return",

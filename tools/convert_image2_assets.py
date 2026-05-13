@@ -21,6 +21,12 @@ MONSTERS = [
     ("monster_wyvern.png", 32, 32),
     ("monster_dungeon_master.png", 64, 32),
     ("monster_archdemon.png", 96, 32),
+    ("monster_kobold.png", 128, 32),
+    ("monster_ooze.png", 160, 32),
+    ("monster_cultist.png", 192, 32),
+    ("monster_ice_hound.png", 224, 32),
+    ("monster_dark_knight.png", 0, 96),
+    ("monster_lich.png", 32, 96),
 ]
 
 WALLS = [
