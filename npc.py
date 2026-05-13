@@ -38,6 +38,10 @@ class NPC:
         self.chase_range     = d["chase_range"]
         self.wander_interval = d["wander_interval"]
         self.enemy_key       = d["enemy_key"]
+        self.npc_type_key    = npc_type_key
+        self.recruitable     = d.get("recruitable", False)
+        self.job_key         = d.get("job_key", "warrior")
+        self.personality     = d.get("personality", "normal")
         self.x = x
         self.y = y
         self.state  = NPC_WANDER

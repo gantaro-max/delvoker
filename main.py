@@ -15,7 +15,7 @@ from constants import (
     STATE_BATTLE_TARGET_PART, STATE_BATTLE_TARGET, STATE_REVIVE, STATE_INV_GIVE_NPC,
     STATE_HOME, STATE_ENDING, STATE_DUNGEON_SKILL, STATE_DUNGEON_SHOP,
     STATE_TITLE, STATE_JOB_SELECT, STATE_BATTLE_SKILL, STATE_LOG_VIEW,
-    STATE_INV_TARGET_SELECT, STATE_NAME_INPUT,
+    STATE_INV_TARGET_SELECT, STATE_NAME_INPUT, STATE_RECRUIT,
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE, TILE_LOCKED_DOOR,
     TILE_FOUNTAIN, TILE_MERCHANT,
@@ -34,7 +34,7 @@ from data import (Status, ENEMY_CATALOG, ITEM_CATALOG, JOBS,
                   NPCMember, Party, ATTR_AFFINITY,
                   Skill, MAX_SKILLS, GrimoireItem, Grave, JOB_SKILLS)
 from logic.map_generator import Map
-from systems.persistence import save_game, load_game, deserialize_item
+from systems.persistence import save_game, load_game, deserialize_item, deserialize_npc_member
 from ui.renderer_3d import draw_3d_view as _draw_3d_view
 from window import Window
 from npc import NPC
@@ -178,6 +178,9 @@ class App:
 
         # NPC list (replaced each dungeon entry)
         self.npcs = []
+        self.pending_recruit_npc = None
+        self.recruit_idx = 0
+        self.recruit_notice = ""
 
         # Battle state
         self.enemies = []
@@ -443,6 +446,15 @@ class App:
             self.inv_win.close()
             self.inv_action_win.close()
             self.shop_win.close()
+        elif new_state == STATE_RECRUIT:
+            self.town_win.close()
+            self.status_win.close()
+            self.battle_win.close()
+            self.inv_win.close()
+            self.inv_action_win.close()
+            self.shop_win.close()
+            self.sub_win.title = "RECRUIT"
+            self.sub_win.open()
         elif new_state == STATE_INVENTORY:
             self.town_win.close()
             self.status_win.close()
@@ -563,7 +575,11 @@ class App:
             if _dungeon_map.tile_at(x, y) == TILE_FLOOR
             and not (x == self.px and y == self.py)
         ]
-        npc_pool = _encounter_pool(self.dungeon_floor)
+        npc_pool = list(_encounter_pool(self.dungeon_floor))
+        if self.dungeon_floor >= 2:
+            npc_pool.append("porter")
+        if self.dungeon_floor >= 4:
+            npc_pool.append("mercenary")
         count = random.randint(2, 4)
         positions = random.sample(floor_tiles, min(count, len(floor_tiles)))
         self.npcs = [NPC(random.choice(npc_pool), px, py)
@@ -607,6 +623,79 @@ class App:
         self._merchant_pos = (nx, ny)
         self.merchant_shop_idx = 0
         self._set_state(STATE_DUNGEON_SHOP)
+
+    def _handle_dungeon_npc_contact(self, npc):
+        if getattr(npc, "recruitable", False):
+            self.pending_recruit_npc = npc
+            self.recruit_idx = 0
+            self.recruit_notice = ""
+            self._set_state(STATE_RECRUIT)
+            return
+        if npc in self.npcs:
+            self.npcs.remove(npc)
+        self._start_battle(npc.enemy_key)
+
+    def _grant_member_job_skill(self, member, job_key):
+        skill_proto = JOB_SKILLS.get(job_key)
+        if skill_proto is None:
+            return
+        already = any(s.name == skill_proto.name for s in member.skills)
+        if not already and len(member.skills) < MAX_SKILLS:
+            member.skills.append(
+                Skill(skill_proto.name, skill_proto.mp_cost,
+                      skill_proto.effect_type, skill_proto.power,
+                      getattr(skill_proto, "is_utility", False))
+            )
+
+    def _make_recruited_member(self, npc):
+        member = NPCMember(npc.job_key, npc.name, npc.personality)
+        target_level = max(1, min(10, self.dungeon_floor))
+        while member.level < target_level:
+            member._do_level_up()
+        member.hp = member.max_hp
+        member.mp = member.max_mp
+        self._grant_member_job_skill(member, npc.job_key)
+        return member
+
+    def _upd_recruit(self):
+        npc = self.pending_recruit_npc
+        if npc is None:
+            self._set_state(STATE_DUNGEON)
+            return
+        options = ["Join", "Fight", "Leave"]
+        if pyxel.btnp(pyxel.KEY_UP):
+            self.recruit_idx = (self.recruit_idx - 1) % len(options)
+            self.recruit_notice = ""
+        if pyxel.btnp(pyxel.KEY_DOWN):
+            self.recruit_idx = (self.recruit_idx + 1) % len(options)
+            self.recruit_notice = ""
+        if pyxel.btnp(pyxel.KEY_X):
+            self.recruit_idx = 2
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_SPACE) or pyxel.btnp(pyxel.KEY_X):
+            sel = options[self.recruit_idx]
+            if sel == "Join":
+                if len(self.party.members) >= Party.MAX_SIZE:
+                    self.recruit_notice = "Party is full."
+                    return
+                member = self._make_recruited_member(npc)
+                self.party.add(member)
+                if npc in self.npcs:
+                    self.npcs.remove(npc)
+                self.pending_recruit_npc = None
+                self.sub_win.title = "RECRUIT"
+                self.town_sub_lines = [f"{member.name} joined!", f"Lv{member.level} {member.job.name}"]
+                self._dialog_return_state = STATE_DUNGEON
+                self._set_state(STATE_TOWN_SUB)
+            elif sel == "Fight":
+                if npc in self.npcs:
+                    self.npcs.remove(npc)
+                self.pending_recruit_npc = None
+                self._start_battle(npc.enemy_key)
+            else:
+                if npc in self.npcs:
+                    self.npcs.remove(npc)
+                self.pending_recruit_npc = None
+                self._set_state(STATE_DUNGEON)
 
     def _open_chest(self):
         global _dungeon_map
@@ -652,10 +741,7 @@ class App:
             if sel == "Continue":
                 self.player = Player("porter")
                 self.load_data()
-                self._grant_job_skill("porter")
-                self.party = Party(self.player)
-                demo_npc = NPCMember("warrior", "Gard", "reckless")
-                self.party.add(demo_npc)
+                self._grant_job_skill(getattr(self.player, "job_key", "porter"))
                 self._set_state(STATE_TOWN)
             else:
                 self.player_name = "HERO"
@@ -965,7 +1051,16 @@ class App:
         exp = enemy.exp_reward if enemy else 0
         gold = enemy.gold_reward if enemy else 0
         self.player.gold += gold
-        level_ups = self.player.gain_exp(exp)
+        level_ups = []
+        npc_level_msgs = []
+        for member in self.party.alive:
+            before_level = member.level
+            member_level_ups = member.gain_exp(exp)
+            if member is self.player:
+                level_ups = member_level_ups
+            elif member_level_ups:
+                npc_level_msgs.append(
+                    f"{member.name} Level Up! Lv{before_level} -> Lv{member.level}")
         self.level_up_gains = level_ups
         msgs.append(f"+{exp} EXP  +{gold} Gold")
         if level_ups:
@@ -984,6 +1079,7 @@ class App:
                 if lu["agi"] > 0:
                     parts.append("AGI+1")
                 msgs.append("  ".join(parts))
+        msgs.extend(npc_level_msgs)
         if random.random() < DROP_RATE:
             wp, ip = _drop_pools(self.dungeon_floor)
             if random.random() < 0.6:
@@ -1081,8 +1177,10 @@ class App:
         attr = getattr(self.player.weapon, "attribute", None)
         popup_col = COL_PINK if is_crit else (
             COL_YELLOW if (attr and attr in enemy.weaknesses) else COL_WHITE)
-        self.add_popup(f"-{dmg}", 116, 68, popup_col)
-        self.effects.append(Effect(128, 63, "spark"))
+        hit_x = getattr(enemy, "screen_cx", SCREEN_W // 2)
+        hit_y = getattr(enemy, "screen_cy", 68)
+        self.add_popup(f"-{dmg}", hit_x - 12, hit_y, popup_col)
+        self.effects.append(Effect(hit_x, hit_y - 5, "spark"))
 
         _aid_verbs = [
             "distracts", "taunts", "harasses", "baits", "lures",
@@ -1258,15 +1356,7 @@ class App:
 
     def _grant_job_skill(self, job_key):
         """Grant the job's initial skill to the player if not already learned."""
-        skill_proto = JOB_SKILLS.get(job_key)
-        if skill_proto is None:
-            return
-        already = any(s.name == skill_proto.name for s in self.player.skills)
-        if not already and len(self.player.skills) < MAX_SKILLS:
-            from data import Skill as _Skill
-            self.player.skills.append(
-                _Skill(skill_proto.name, skill_proto.mp_cost,
-                       skill_proto.effect_type, skill_proto.power))
+        self._grant_member_job_skill(self.player, job_key)
 
     def _try_flee(self):
         if self._current_enemy_key in ("dungeon_master", "archdemon"):
@@ -1284,7 +1374,7 @@ class App:
             return COL_YELLOW
         if "LOST" in msg or "Bag full" in msg:
             return COL_RED
-        if "LEVEL UP" in msg or "HP+" in msg:
+        if "LEVEL UP" in msg.upper() or "HP+" in msg:
             return COL_GREEN
         if "[POWER]" in msg or "[Poison]" in msg:
             return COL_ORANGE
@@ -1361,6 +1451,8 @@ class App:
             self._upd_town_sub()
         elif self.state == STATE_DUNGEON:
             self._upd_dungeon()
+        elif self.state == STATE_RECRUIT:
+            self._upd_recruit()
         elif self.state == STATE_BATTLE_CMD:
             self._upd_battle_cmd()
         elif self.state == STATE_BATTLE_NPC_CMD:
@@ -1528,8 +1620,7 @@ class App:
                 return
             for npc in self.npcs:
                 if npc.at_player(self.px, self.py):
-                    self.npcs.remove(npc)
-                    self._start_battle(npc.enemy_key)
+                    self._handle_dungeon_npc_contact(npc)
                     return
             if self.steps_since_encounter >= 4:
                 rate = ENCOUNTER_RATE * min(1.0, (self.steps_since_encounter - 3) / 7.0)
@@ -1540,8 +1631,7 @@ class App:
         for npc in self.npcs:
             npc.update(self.px, self.py, is_wall)
             if npc.at_player(self.px, self.py):
-                self.npcs.remove(npc)
-                self._start_battle(npc.enemy_key)
+                self._handle_dungeon_npc_contact(npc)
                 return
 
     def _upd_battle_npc_cmd(self):
@@ -2113,11 +2203,14 @@ class App:
     # ---- Persistence ----
 
     def save_data(self):
-        save_game(self.player, self.unlocked_jobs, self.game_cleared, bestiary=self.bestiary)
+        save_game(self.player, self.unlocked_jobs, self.game_cleared,
+                  bestiary=self.bestiary, party_members=self.party.members[1:])
 
     def load_data(self):
         data = load_game()
         if not data:
+            self.party = Party(self.player)
+            self.party.add(NPCMember("warrior", "Gard", "reckless"))
             return
         self.player.name = data.get("player_name", "HERO")
         self.player_name = self.player.name
@@ -2130,6 +2223,13 @@ class App:
         self.unlocked_jobs = data.get("unlocked_jobs", ["porter"])
         self.game_cleared = data.get("game_cleared", False)
         self.bestiary = data.get("bestiary", {})
+        self.party = Party(self.player)
+        saved_npcs = [deserialize_npc_member(d) for d in data.get("party_npcs", [])]
+        if saved_npcs:
+            for npc in saved_npcs[:Party.MAX_SIZE - 1]:
+                self.party.add(npc)
+        else:
+            self.party.add(NPCMember("warrior", "Gard", "reckless"))
 
     # ---- Shop logic ----
 
@@ -2202,6 +2302,12 @@ class App:
             self.draw_status()
             self.draw_minimap()
             self._draw_dungeon_skill()
+        elif self.state == STATE_RECRUIT:
+            self.draw_3d_view()
+            self.draw_npcs()
+            self.draw_status()
+            self.draw_minimap()
+            self._draw_recruit()
         elif self.state == STATE_DUNGEON_SHOP:
             self._draw_dungeon_shop()
         elif self.state == STATE_ENDING:
@@ -2362,7 +2468,8 @@ class App:
         alive_for_target = [e for e in self.enemies if e.hp > 0]
 
         for i, enemy in enumerate(self.enemies):
-            cx = slot_w // 2 + i * slot_w  # horizontal center of this slot
+            cx = SCREEN_W // 2 if n == 1 else slot_w // 2 + i * slot_w
+            enemy.screen_cx = cx
 
             # Name
             name_x = max(0, cx - len(enemy.name) * 2)
@@ -2372,6 +2479,7 @@ class App:
             # Sprite / fallback rect
             sprite_x = cx - 16
             sprite_y = ey + (eh - 32) // 2
+            enemy.screen_cy = sprite_y + 16
             self._draw_enemy_sprite(enemy, sprite_x, sprite_y)
 
             # HP bar
@@ -2991,6 +3099,30 @@ class App:
             pyxel.text(cx, cy + ch - 16, f"Gold: {self.player.gold}G",
                        COL_YELLOW)
             pyxel.text(cx, cy + ch - 8, "Z:Revive  X:Back", COL_DARK_GRAY)
+
+        self.sub_win.draw(_content)
+
+    def _draw_recruit(self):
+        npc = self.pending_recruit_npc
+        options = ["Join", "Fight", "Leave"]
+
+        def _content(cx, cy, cw, ch):
+            if npc is None:
+                pyxel.text(cx, cy, "No one is here.", COL_DARK_GRAY)
+                return
+            pyxel.text(cx, cy, f"Recruit {npc.name}?", COL_YELLOW)
+            pyxel.text(cx, cy + 12, f"Job:{npc.job_key}  Type:{npc.personality}", COL_LIGHT_GRAY)
+            full = len(self.party.members) >= Party.MAX_SIZE
+            for i, opt in enumerate(options):
+                cursor = ">" if i == self.recruit_idx else " "
+                disabled = opt == "Join" and full
+                col = COL_DARK_GRAY if disabled else (COL_YELLOW if i == self.recruit_idx else COL_WHITE)
+                pyxel.text(cx, cy + 32 + i * 14, f"{cursor} {opt}", col)
+            if self.recruit_notice:
+                pyxel.text(cx, cy + ch - 22, self.recruit_notice, COL_RED)
+            elif full:
+                pyxel.text(cx, cy + ch - 22, "Party is full.", COL_RED)
+            pyxel.text(cx, cy + ch - 8, "Z:OK  X:Leave  Up/Down", COL_DARK_GRAY)
 
         self.sub_win.draw(_content)
 

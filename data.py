@@ -347,6 +347,10 @@ NPC_TYPES = {
     "wraith":   {"name": "Wraith",   "color": 12, "chase_range": 4, "wander_interval": 55, "enemy_key": "wraith"},
     "golem":    {"name": "Golem",    "color": 6,  "chase_range": 3, "wander_interval": 70, "enemy_key": "golem"},
     "wyvern":   {"name": "Wyvern",   "color": 8,  "chase_range": 5, "wander_interval": 35, "enemy_key": "wyvern"},
+    "porter":   {"name": "Porter",   "color": 10, "chase_range": 2, "wander_interval": 65, "enemy_key": "goblin",
+                 "recruitable": True, "job_key": "porter", "personality": "normal"},
+    "mercenary": {"name": "Merc",    "color": 15, "chase_range": 2, "wander_interval": 55, "enemy_key": "skeleton",
+                  "recruitable": True, "job_key": "warrior", "personality": "reckless"},
 }
 
 # 三すくみ属性相性: fire > ice > poison > fire
@@ -444,6 +448,7 @@ class Status:
     def __init__(self, job_key="warrior", name="Hero"):
         job = JOBS[job_key]
         self.name = name
+        self.job_key = job_key
         self.job = job
         self.level = 1
         self.exp = 0

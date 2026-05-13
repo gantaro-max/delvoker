@@ -1,7 +1,7 @@
 import json
 from data import (
     WeaponItem, EnchantedWeapon, ArmorItem, EnchantedArmor,
-    GrimoireItem, ConsumableItem, AccessoryItem,
+    GrimoireItem, ConsumableItem, AccessoryItem, NPCMember, Skill,
 )
 from constants import SAVE_FILE
 
@@ -89,7 +89,74 @@ def deserialize_item(d):
                           d.get("value", 0), d.get("cure_status", ""))
 
 
-def save_game(player, unlocked_jobs, game_cleared, bestiary=None, filepath=SAVE_FILE):
+def serialize_member(member):
+    return {
+        "name": member.name,
+        "job_key": getattr(member, "job_key", "warrior"),
+        "personality": getattr(member, "personality", "normal"),
+        "level": member.level,
+        "exp": member.exp,
+        "hp": member.hp,
+        "mp": member.mp,
+        "max_hp": member.max_hp,
+        "max_mp": member.max_mp,
+        "str": member.str_,
+        "def": member.def_,
+        "agi": member.agi,
+        "luk": member.luk,
+        "mag": member.mag,
+        "bonus_points": member.bonus_points,
+        "weapon": serialize_item(member.weapon) if member.weapon else None,
+        "armor": serialize_item(member.armor) if member.armor else None,
+        "accessory": serialize_item(member.accessory) if member.accessory else None,
+        "skills": [
+            {
+                "name": s.name,
+                "mp_cost": s.mp_cost,
+                "effect_type": s.effect_type,
+                "power": s.power,
+                "is_utility": getattr(s, "is_utility", False),
+            }
+            for s in getattr(member, "skills", [])
+        ],
+        "status_effects": dict(getattr(member, "status_effects", {})),
+        "is_unique": getattr(member, "is_unique", False),
+    }
+
+
+def deserialize_npc_member(d):
+    member = NPCMember(
+        d.get("job_key", "warrior"),
+        d.get("name", "NPC"),
+        d.get("personality", "normal"),
+    )
+    member.level = d.get("level", member.level)
+    member.exp = d.get("exp", member.exp)
+    member.max_hp = d.get("max_hp", member.max_hp)
+    member.max_mp = d.get("max_mp", member.max_mp)
+    member.hp = min(d.get("hp", member.max_hp), member.max_hp)
+    member.mp = min(d.get("mp", member.max_mp), member.max_mp)
+    member.str_ = d.get("str", member.str_)
+    member.def_ = d.get("def", member.def_)
+    member.agi = d.get("agi", member.agi)
+    member.luk = d.get("luk", member.luk)
+    member.mag = d.get("mag", member.mag)
+    member.bonus_points = d.get("bonus_points", member.bonus_points)
+    member.weapon = deserialize_item(d["weapon"]) if d.get("weapon") else member.weapon
+    member.armor = deserialize_item(d["armor"]) if d.get("armor") else None
+    member.accessory = deserialize_item(d["accessory"]) if d.get("accessory") else None
+    member.skills = [
+        Skill(s.get("name", "Skill"), s.get("mp_cost", 5),
+              s.get("effect_type", "attack"), s.get("power", 10),
+              s.get("is_utility", False))
+        for s in d.get("skills", [])
+    ]
+    member.status_effects = d.get("status_effects", {"poison": 0, "stun": 0})
+    member.is_unique = d.get("is_unique", False)
+    return member
+
+
+def save_game(player, unlocked_jobs, game_cleared, bestiary=None, party_members=None, filepath=SAVE_FILE):
     data = {
         "player_name": player.name,
         "gold": player.gold,
@@ -99,6 +166,7 @@ def save_game(player, unlocked_jobs, game_cleared, bestiary=None, filepath=SAVE_
         "unlocked_jobs": list(unlocked_jobs),
         "game_cleared": game_cleared,
         "bestiary": bestiary or {},
+        "party_npcs": [serialize_member(m) for m in (party_members or [])],
     }
     with open(filepath, "w", encoding="ascii") as f:
         json.dump(data, f, ensure_ascii=True)

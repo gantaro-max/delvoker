@@ -71,6 +71,18 @@ def _monster_bbox(src: pyxel.Image, bg_col: int = 3) -> tuple[int, int, int, int
     )
 
 
+def _square_box(box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    x0, y0, x1, y1 = box
+    w = x1 - x0 + 1
+    h = y1 - y0 + 1
+    size = max(w, h)
+    cx = (x0 + x1) // 2
+    cy = (y0 + y1) // 2
+    nx0 = max(0, min(SRC_SIZE - size, cx - size // 2))
+    ny0 = max(0, min(SRC_SIZE - size, cy - size // 2))
+    return (nx0, ny0, nx0 + size - 1, ny0 + size - 1)
+
+
 def _blit_scaled(
     src: pyxel.Image,
     dst: pyxel.Image,
@@ -106,7 +118,7 @@ def import_monsters() -> None:
             continue
         src = _load_png(path)
         bg = src.pget(0, 0)
-        box = _monster_bbox(src, bg)
+        box = _square_box(_monster_bbox(src, bg))
         _clear_rect(dst, u, v, 32, 32)
         _blit_scaled(src, dst, box, u, v, 32, 32, transparent=bg)
         print(f"[OK] monster {filename} -> ({u},{v}) bg={bg} box={box}")
