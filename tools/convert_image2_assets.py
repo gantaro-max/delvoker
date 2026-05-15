@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets" / "source" / "image2"
 PYXRES = ROOT / "assets.pyxres"
 SRC_SIZE = 1254
+SURFACE_SRC_SIZE = 128
 
 MONSTERS = [
     ("monster_slime.png", 0, 0),
@@ -61,8 +62,66 @@ SURFACES = [
 ]
 
 
-def _load_png(path: Path) -> pyxel.Image:
-    img = pyxel.Image(SRC_SIZE, SRC_SIZE)
+def _solid_tile(col: int) -> list[list[int]]:
+    return [[col for _ in range(SURFACE_TILE_SIZE)] for _ in range(SURFACE_TILE_SIZE)]
+
+
+def _surface_h_scuffs(base: int, accent: int) -> list[list[int]]:
+    tile = _solid_tile(base)
+    for y, x0, x1 in (
+        (1, 2, 5), (1, 10, 12),
+        (4, 0, 3), (4, 7, 9), (4, 13, 15),
+        (8, 4, 7), (8, 11, 14),
+        (12, 1, 4), (12, 8, 10),
+        (14, 5, 6), (14, 12, 15),
+    ):
+        for x in range(x0, x1 + 1):
+            tile[y][x] = accent
+    return tile
+
+
+def _surface_v_scuffs(base: int, accent: int) -> list[list[int]]:
+    tile = _solid_tile(base)
+    for x, y0, y1 in (
+        (1, 2, 5), (1, 10, 12),
+        (4, 0, 3), (4, 7, 9), (4, 13, 15),
+        (8, 4, 7), (8, 11, 14),
+        (12, 1, 4), (12, 8, 10),
+        (14, 5, 6), (14, 12, 15),
+    ):
+        for y in range(y0, y1 + 1):
+            tile[y][x] = accent
+    return tile
+
+
+def _surface_far(dark: int, mid: int) -> list[list[int]]:
+    tile = _solid_tile(dark)
+    for x, y in ((4, 3), (11, 3), (7, 7), (13, 9), (2, 12), (9, 13)):
+        tile[y][x] = mid
+    return tile
+
+
+SURFACE_PATTERNS = {
+    "surface_b1_b2_ceiling.png": _surface_h_scuffs(13, 7),
+    "surface_b1_b2_side_wall.png": _surface_v_scuffs(13, 7),
+    "surface_b1_b2_front_wall.png": _surface_v_scuffs(13, 7),
+    "surface_b1_b2_floor.png": _surface_h_scuffs(13, 7),
+    "surface_b1_b2_far.png": _surface_far(0, 13),
+    "surface_b3_b4_ceiling.png": _surface_h_scuffs(5, 3),
+    "surface_b3_b4_side_wall.png": _surface_v_scuffs(5, 3),
+    "surface_b3_b4_front_wall.png": _surface_v_scuffs(5, 3),
+    "surface_b3_b4_floor.png": _surface_h_scuffs(5, 3),
+    "surface_b3_b4_far.png": _surface_far(0, 5),
+    "surface_b5_plus_ceiling.png": _surface_h_scuffs(1, 2),
+    "surface_b5_plus_side_wall.png": _surface_v_scuffs(1, 2),
+    "surface_b5_plus_front_wall.png": _surface_v_scuffs(1, 2),
+    "surface_b5_plus_floor.png": _surface_h_scuffs(1, 2),
+    "surface_b5_plus_far.png": _surface_far(0, 1),
+}
+
+
+def _load_png(path: Path, size: int = SRC_SIZE) -> pyxel.Image:
+    img = pyxel.Image(size, size)
     img.load(0, 0, str(path.resolve()))
     return img
 
@@ -135,6 +194,12 @@ def _blit_scaled(
             dst.pset(dst_x + x, dst_y + y, col)
 
 
+def _blit_surface_pattern(dst: pyxel.Image, pattern: list[list[int]], x: int, y: int) -> None:
+    for yy, row in enumerate(pattern):
+        for xx, col in enumerate(row):
+            dst.pset(x + xx, y + yy, col)
+
+
 def import_monsters() -> None:
     dst = pyxel.images[0]
     for filename, u, v in MONSTERS:
@@ -160,8 +225,8 @@ def import_walls() -> None:
         if not path.exists():
             print(f"[WARN] missing wall source: {filename}")
             continue
-        src = _load_png(path)
-        _blit_scaled(src, dst, (0, 0, SRC_SIZE - 1, SRC_SIZE - 1),
+        src = _load_png(path, SURFACE_SRC_SIZE)
+        _blit_scaled(src, dst, (0, 0, SURFACE_SRC_SIZE - 1, SURFACE_SRC_SIZE - 1),
                      u, v, SURFACE_TILE_SIZE, SURFACE_TILE_SIZE, remap=remap)
         print(f"[OK] wall {path.name} -> ({u},{v})")
 
@@ -185,6 +250,11 @@ def import_backgrounds() -> None:
 def import_surfaces() -> None:
     dst = pyxel.images[0]
     for filename, u, v, remap in SURFACES:
+        pattern = SURFACE_PATTERNS.get(filename)
+        if pattern is not None:
+            _blit_surface_pattern(dst, pattern, u, v)
+            print(f"[OK] surface pattern {filename} -> ({u},{v})")
+            continue
         path = SOURCE / "surfaces" / filename
         if not path.exists():
             print(f"[WARN] missing surface source: {filename}")
