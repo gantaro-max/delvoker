@@ -101,15 +101,15 @@ def _surface_far(dark: int, mid: int) -> list[list[int]]:
 
 
 SURFACE_PATTERNS = {
-    "surface_b1_b2_ceiling.png": _surface_h_scuffs(13, 1),
-    "surface_b1_b2_side_wall.png": _surface_v_scuffs(13, 1),
-    "surface_b1_b2_front_wall.png": _surface_v_scuffs(13, 1),
-    "surface_b1_b2_floor.png": _surface_h_scuffs(13, 1),
+    "surface_b1_b2_ceiling.png": _surface_h_scuffs(13, 7),
+    "surface_b1_b2_side_wall.png": _surface_v_scuffs(13, 7),
+    "surface_b1_b2_front_wall.png": _surface_v_scuffs(13, 7),
+    "surface_b1_b2_floor.png": _surface_h_scuffs(13, 7),
     "surface_b1_b2_far.png": _surface_far(0, 13),
-    "surface_b3_b4_ceiling.png": _surface_h_scuffs(5, 1),
-    "surface_b3_b4_side_wall.png": _surface_v_scuffs(5, 1),
-    "surface_b3_b4_front_wall.png": _surface_v_scuffs(5, 1),
-    "surface_b3_b4_floor.png": _surface_h_scuffs(5, 1),
+    "surface_b3_b4_ceiling.png": _surface_h_scuffs(5, 3),
+    "surface_b3_b4_side_wall.png": _surface_v_scuffs(5, 3),
+    "surface_b3_b4_front_wall.png": _surface_v_scuffs(5, 3),
+    "surface_b3_b4_floor.png": _surface_h_scuffs(5, 3),
     "surface_b3_b4_far.png": _surface_far(0, 5),
     "surface_b5_plus_ceiling.png": _surface_h_scuffs(1, 2),
     "surface_b5_plus_side_wall.png": _surface_v_scuffs(1, 2),

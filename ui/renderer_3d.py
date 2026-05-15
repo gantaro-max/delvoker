@@ -10,6 +10,8 @@ SURF_FRONT_WALL = 2
 SURF_FLOOR = 3
 SURF_FAR = 4
 
+USE_SURFACE_TEXTURES = False
+
 # Surface tiles (tx, ty) in image bank 0; 16x16 sprite per biome tier.
 SURFACE_TILE_SIZE = 16
 _SURFACE_TILES = [
@@ -73,6 +75,7 @@ def _blt_tile_quad(tx: int, ty: int,
 
 def draw_3d_view(wall_at_fn, assets_loaded: bool = False, dungeon_floor: int = 1):
     """Render the first-person 3D corridor view."""
+    assets_loaded = assets_loaded and USE_SURFACE_TEXTURES
     surfaces = _surface_tiles(dungeon_floor)
     ceiling_tile = surfaces[SURF_CEILING]
     side_wall_tile = surfaces[SURF_SIDE_WALL]
@@ -157,11 +160,10 @@ def draw_3d_view(wall_at_fn, assets_loaded: bool = False, dungeon_floor: int = 1
 
         # Depth outline (helps separate tiers visually)
         if d < MAX_DEPTH - 1:
-            outline_col = COL_BLACK if assets_loaded else COL_DARK_GRAY
             if front:
                 pyxel.rectb(nfx1, nfy1, nfx2 - nfx1 + 1,
-                            nfy2 - nfy1 + 1, outline_col)
-            pyxel.line(fx1, fy1, nfx1, nfy1, outline_col)
-            pyxel.line(fx2, fy1, nfx2, nfy1, outline_col)
-            pyxel.line(fx1, fy2, nfx1, nfy2, outline_col)
-            pyxel.line(fx2, fy2, nfx2, nfy2, outline_col)
+                            nfy2 - nfy1 + 1, COL_DARK_GRAY)
+            pyxel.line(fx1, fy1, nfx1, nfy1, COL_DARK_GRAY)
+            pyxel.line(fx2, fy1, nfx2, nfy1, COL_DARK_GRAY)
+            pyxel.line(fx1, fy2, nfx1, nfy2, COL_DARK_GRAY)
+            pyxel.line(fx2, fy2, nfx2, nfy2, COL_DARK_GRAY)
