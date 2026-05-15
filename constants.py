@@ -36,7 +36,7 @@ FRAMES = [
     (105, 72,  150, 103),
 ]
 
-WALL_COLS = [COL_INDIGO, COL_BROWN, COL_BROWN, COL_BLACK]
+WALL_COLS = [COL_GREEN, COL_DARK_GREEN, COL_DARK_GREEN, COL_NAVY]
 
 # Static fallback map (used only when _dungeon_map is None)
 DUNGEON_MAP = [
