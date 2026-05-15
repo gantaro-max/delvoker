@@ -4,17 +4,26 @@ from constants import (
     COL_BLACK, COL_DARK_GRAY,
 )
 
-# Biome tile (tx, ty) in image bank 0; 8x8 sprite per biome tier.
-# floor 1-2 -> basic stone, 3-4 -> deeper stone, 5+ -> dark stone
-_BIOME_TILES = [(0, 64), (8, 64), (16, 64)]
+SURF_CEILING = 0
+SURF_SIDE_WALL = 1
+SURF_FRONT_WALL = 2
+SURF_FLOOR = 3
+SURF_FAR = 4
+
+# Surface tiles (tx, ty) in image bank 0; 8x8 sprite per biome tier.
+_SURFACE_TILES = [
+    ((24, 64), (32, 64), (40, 64), (48, 64), (56, 64)),
+    ((64, 64), (72, 64), (80, 64), (88, 64), (96, 64)),
+    ((104, 64), (112, 64), (120, 64), (128, 64), (136, 64)),
+]
 
 
-def _biome_tile(floor: int) -> tuple:
+def _surface_tiles(floor: int) -> tuple:
     if floor <= 2:
-        return _BIOME_TILES[0]
+        return _SURFACE_TILES[0]
     if floor <= 4:
-        return _BIOME_TILES[1]
-    return _BIOME_TILES[2]
+        return _SURFACE_TILES[1]
+    return _SURFACE_TILES[2]
 
 
 def _blt_tile_rect(x: int, y: int, w: int, h: int, tx: int, ty: int) -> None:
@@ -38,7 +47,8 @@ def _blt_tile_rect(x: int, y: int, w: int, h: int, tx: int, ty: int) -> None:
 
 def _blt_tile_quad(tx: int, ty: int,
                    x1: int, x2: int,
-                   yt1: int, yt2: int, yb1: int, yb2: int) -> None:
+                   yt1: int, yt2: int, yb1: int, yb2: int,
+                   flip_x: bool = False) -> None:
     """Tile-fill a quadrilateral by scanning 1px vertical strips from x1..x2.
     Top edge linearly interpolates yt1->yt2; bottom edge yb1->yb2.
     Used for side-wall trapezoids that taper into depth."""
@@ -51,7 +61,7 @@ def _blt_tile_quad(tx: int, ty: int,
         yb = int(yb1 + (yb2 - yb1) * t)
         if yb < yt:
             continue
-        ox = x & 7
+        ox = 7 - (x & 7) if flip_x else x & 7
         row = yt
         while row <= yb:
             oy = row & 7
@@ -62,13 +72,20 @@ def _blt_tile_quad(tx: int, ty: int,
 
 def draw_3d_view(wall_at_fn, assets_loaded: bool = False, dungeon_floor: int = 1):
     """Render the first-person 3D corridor view."""
-    tx, ty = _biome_tile(dungeon_floor)
+    surfaces = _surface_tiles(dungeon_floor)
+    ceiling_tile = surfaces[SURF_CEILING]
+    side_wall_tile = surfaces[SURF_SIDE_WALL]
+    front_wall_tile = surfaces[SURF_FRONT_WALL]
+    floor_tile = surfaces[SURF_FLOOR]
+    far_tile = surfaces[SURF_FAR]
 
     # --- Floor & Ceiling background -----------------------------------
     if assets_loaded:
         half = VIEW_H // 2
-        _blt_tile_rect(0, 0,    256, half,          tx, ty)  # ceiling
-        _blt_tile_rect(0, half, 256, VIEW_H - half, tx, ty)  # floor
+        ctx, cty = ceiling_tile
+        ftx, fty = floor_tile
+        _blt_tile_rect(0, 0,    256, half,          ctx, cty)
+        _blt_tile_rect(0, half, 256, VIEW_H - half, ftx, fty)
     else:
         # Fallback: original solid-color perspective fan
         for d in range(MAX_DEPTH - 1, -1, -1):
@@ -82,7 +99,12 @@ def draw_3d_view(wall_at_fn, assets_loaded: bool = False, dungeon_floor: int = 1
 
     # --- Far-end darkness (deeper than MAX_DEPTH) ---------------------
     nfx1, nfy1, nfx2, nfy2 = FRAMES[MAX_DEPTH]
-    pyxel.rect(nfx1, nfy1, nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, COL_BLACK)
+    if assets_loaded:
+        far_tx, far_ty = far_tile
+        _blt_tile_rect(nfx1, nfy1,
+                       nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, far_tx, far_ty)
+    else:
+        pyxel.rect(nfx1, nfy1, nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, COL_BLACK)
 
     # --- Find nearest front wall --------------------------------------
     visible = MAX_DEPTH
@@ -102,26 +124,32 @@ def draw_3d_view(wall_at_fn, assets_loaded: bool = False, dungeon_floor: int = 1
 
         if front:
             if assets_loaded:
+                front_tx, front_ty = front_wall_tile
                 _blt_tile_rect(nfx1, nfy1,
-                               nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, tx, ty)
+                               nfx2 - nfx1 + 1, nfy2 - nfy1 + 1,
+                               front_tx, front_ty)
             else:
                 pyxel.rect(nfx1, nfy1,
                            nfx2 - nfx1 + 1, nfy2 - nfy1 + 1, wc)
 
         if left:
             if assets_loaded:
+                side_tx, side_ty = side_wall_tile
                 # Left side wall: trapezoid (fx1,fy1)-(nfx1,nfy1) top,
                 # (fx1,fy2)-(nfx1,nfy2) bottom.
-                _blt_tile_quad(tx, ty, fx1, nfx1, fy1, nfy1, fy2, nfy2)
+                _blt_tile_quad(side_tx, side_ty, fx1, nfx1, fy1, nfy1,
+                               fy2, nfy2, flip_x=True)
             else:
                 pyxel.tri(fx1, fy1, nfx1, nfy1, nfx1, nfy2, wc)
                 pyxel.tri(fx1, fy1, fx1,  fy2,  nfx1, nfy2, wc)
 
         if right:
             if assets_loaded:
+                side_tx, side_ty = side_wall_tile
                 # Right side wall: trapezoid (nfx2,nfy1)-(fx2,fy1) top,
                 # (nfx2,nfy2)-(fx2,fy2) bottom.
-                _blt_tile_quad(tx, ty, nfx2, fx2, nfy1, fy1, nfy2, fy2)
+                _blt_tile_quad(side_tx, side_ty, nfx2, fx2, nfy1, fy1,
+                               nfy2, fy2)
             else:
                 pyxel.tri(nfx2, nfy1, fx2, fy1, fx2, fy2, wc)
                 pyxel.tri(nfx2, nfy1, nfx2, nfy2, fx2, fy2, wc)

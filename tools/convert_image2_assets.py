@@ -40,6 +40,24 @@ BACKGROUNDS = [
     ("background_ending.png", 2),
 ]
 
+SURFACES = [
+    ("surface_b1_b2_ceiling.png", 24, 64, None),
+    ("surface_b1_b2_side_wall.png", 32, 64, None),
+    ("surface_b1_b2_front_wall.png", 40, 64, None),
+    ("surface_b1_b2_floor.png", 48, 64, None),
+    ("surface_b1_b2_far.png", 56, 64, None),
+    ("surface_b3_b4_ceiling.png", 64, 64, None),
+    ("surface_b3_b4_side_wall.png", 72, 64, None),
+    ("surface_b3_b4_front_wall.png", 80, 64, None),
+    ("surface_b3_b4_floor.png", 88, 64, None),
+    ("surface_b3_b4_far.png", 96, 64, None),
+    ("surface_b5_plus_ceiling.png", 104, 64, None),
+    ("surface_b5_plus_side_wall.png", 112, 64, None),
+    ("surface_b5_plus_front_wall.png", 120, 64, None),
+    ("surface_b5_plus_floor.png", 128, 64, None),
+    ("surface_b5_plus_far.png", 136, 64, None),
+]
+
 
 def _load_png(path: Path) -> pyxel.Image:
     img = pyxel.Image(SRC_SIZE, SRC_SIZE)
@@ -162,11 +180,25 @@ def import_backgrounds() -> None:
         print(f"[OK] background {path.name} -> bank {bank}")
 
 
+def import_surfaces() -> None:
+    dst = pyxel.images[0]
+    for filename, u, v, remap in SURFACES:
+        path = SOURCE / "surfaces" / filename
+        if not path.exists():
+            print(f"[WARN] missing surface source: {filename}")
+            continue
+        src = _load_png(path)
+        _blit_scaled(src, dst, (0, 0, SRC_SIZE - 1, SRC_SIZE - 1),
+                     u, v, 8, 8, remap=remap)
+        print(f"[OK] surface {path.name} -> ({u},{v})")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--monsters", action="store_true")
     parser.add_argument("--walls", action="store_true")
     parser.add_argument("--backgrounds", action="store_true")
+    parser.add_argument("--surfaces", action="store_true")
     parser.add_argument("--all", action="store_true")
     args = parser.parse_args()
 
@@ -174,13 +206,17 @@ def main() -> None:
     if PYXRES.exists():
         pyxel.load(str(PYXRES))
 
-    do_all = args.all or not (args.monsters or args.walls or args.backgrounds)
+    do_all = args.all or not (
+        args.monsters or args.walls or args.backgrounds or args.surfaces
+    )
     if do_all or args.monsters:
         import_monsters()
     if do_all or args.walls:
         import_walls()
     if do_all or args.backgrounds:
         import_backgrounds()
+    if do_all or args.surfaces:
+        import_surfaces()
 
     pyxel.save(str(PYXRES))
     print(f"[OK] saved {PYXRES}")
