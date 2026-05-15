@@ -7,7 +7,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets" / "source" / "image2"
 PYXRES = ROOT / "assets.pyxres"
 SRC_SIZE = 1254
-SURFACE_SRC_SIZE = 128
 
 MONSTERS = [
     ("monster_slime.png", 0, 0),
@@ -102,15 +101,15 @@ def _surface_far(dark: int, mid: int) -> list[list[int]]:
 
 
 SURFACE_PATTERNS = {
-    "surface_b1_b2_ceiling.png": _surface_h_scuffs(13, 7),
-    "surface_b1_b2_side_wall.png": _surface_v_scuffs(13, 7),
-    "surface_b1_b2_front_wall.png": _surface_v_scuffs(13, 7),
-    "surface_b1_b2_floor.png": _surface_h_scuffs(13, 7),
+    "surface_b1_b2_ceiling.png": _surface_h_scuffs(13, 1),
+    "surface_b1_b2_side_wall.png": _surface_v_scuffs(13, 1),
+    "surface_b1_b2_front_wall.png": _surface_v_scuffs(13, 1),
+    "surface_b1_b2_floor.png": _surface_h_scuffs(13, 1),
     "surface_b1_b2_far.png": _surface_far(0, 13),
-    "surface_b3_b4_ceiling.png": _surface_h_scuffs(5, 3),
-    "surface_b3_b4_side_wall.png": _surface_v_scuffs(5, 3),
-    "surface_b3_b4_front_wall.png": _surface_v_scuffs(5, 3),
-    "surface_b3_b4_floor.png": _surface_h_scuffs(5, 3),
+    "surface_b3_b4_ceiling.png": _surface_h_scuffs(5, 1),
+    "surface_b3_b4_side_wall.png": _surface_v_scuffs(5, 1),
+    "surface_b3_b4_front_wall.png": _surface_v_scuffs(5, 1),
+    "surface_b3_b4_floor.png": _surface_h_scuffs(5, 1),
     "surface_b3_b4_far.png": _surface_far(0, 5),
     "surface_b5_plus_ceiling.png": _surface_h_scuffs(1, 2),
     "surface_b5_plus_side_wall.png": _surface_v_scuffs(1, 2),
@@ -225,9 +224,9 @@ def import_walls() -> None:
         if not path.exists():
             print(f"[WARN] missing wall source: {filename}")
             continue
-        src = _load_png(path, SURFACE_SRC_SIZE)
-        _blit_scaled(src, dst, (0, 0, SURFACE_SRC_SIZE - 1, SURFACE_SRC_SIZE - 1),
-                     u, v, SURFACE_TILE_SIZE, SURFACE_TILE_SIZE, remap=remap)
+        src = _load_png(path)
+        _blit_scaled(src, dst, (0, 0, SRC_SIZE - 1, SRC_SIZE - 1),
+                     u, v, 8, 8, remap=remap)
         print(f"[OK] wall {path.name} -> ({u},{v})")
 
 
