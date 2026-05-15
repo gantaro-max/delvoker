@@ -10,11 +10,12 @@ SURF_FRONT_WALL = 2
 SURF_FLOOR = 3
 SURF_FAR = 4
 
-# Surface tiles (tx, ty) in image bank 0; 8x8 sprite per biome tier.
+# Surface tiles (tx, ty) in image bank 0; 16x16 sprite per biome tier.
+SURFACE_TILE_SIZE = 16
 _SURFACE_TILES = [
-    ((24, 64), (32, 64), (40, 64), (48, 64), (56, 64)),
-    ((64, 64), (72, 64), (80, 64), (88, 64), (96, 64)),
-    ((104, 64), (112, 64), (120, 64), (128, 64), (136, 64)),
+    ((0, 128), (16, 128), (32, 128), (48, 128), (64, 128)),
+    ((80, 128), (96, 128), (112, 128), (128, 128), (144, 128)),
+    ((160, 128), (176, 128), (192, 128), (208, 128), (224, 128)),
 ]
 
 
@@ -27,19 +28,19 @@ def _surface_tiles(floor: int) -> tuple:
 
 
 def _blt_tile_rect(x: int, y: int, w: int, h: int, tx: int, ty: int) -> None:
-    """Tile an 8x8 sprite to fill a rect, aligned to the screen grid so
+    """Tile a surface sprite to fill a rect, aligned to the screen grid so
     neighbouring rects share seamless tile borders."""
     if w <= 0 or h <= 0:
         return
     x_end, y_end = x + w, y + h
     row = y
     while row < y_end:
-        oy = row & 7
-        ch = min(8 - oy, y_end - row)
+        oy = row % SURFACE_TILE_SIZE
+        ch = min(SURFACE_TILE_SIZE - oy, y_end - row)
         col = x
         while col < x_end:
-            ox = col & 7
-            cw = min(8 - ox, x_end - col)
+            ox = col % SURFACE_TILE_SIZE
+            cw = min(SURFACE_TILE_SIZE - ox, x_end - col)
             pyxel.blt(col, row, 0, tx + ox, ty + oy, cw, ch)
             col += cw
         row += ch
@@ -61,11 +62,11 @@ def _blt_tile_quad(tx: int, ty: int,
         yb = int(yb1 + (yb2 - yb1) * t)
         if yb < yt:
             continue
-        ox = 7 - (x & 7) if flip_x else x & 7
+        ox = SURFACE_TILE_SIZE - 1 - (x % SURFACE_TILE_SIZE) if flip_x else x % SURFACE_TILE_SIZE
         row = yt
         while row <= yb:
-            oy = row & 7
-            ch = min(8 - oy, yb - row + 1)
+            oy = row % SURFACE_TILE_SIZE
+            ch = min(SURFACE_TILE_SIZE - oy, yb - row + 1)
             pyxel.blt(x, row, 0, tx + ox, ty + oy, 1, ch)
             row += ch
 

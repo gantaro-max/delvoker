@@ -8,8 +8,7 @@
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
-        "anthropic.claude-code",
-        "google.geminicodeassist",
+        "anthropic.claude-code",        
         "openai.chatgpt",
         "tamasfe.even-better-toml",
         "GitHub.vscode-pull-request-github",

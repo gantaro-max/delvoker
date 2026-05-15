@@ -40,22 +40,24 @@ BACKGROUNDS = [
     ("background_ending.png", 2),
 ]
 
+SURFACE_TILE_SIZE = 16
+
 SURFACES = [
-    ("surface_b1_b2_ceiling.png", 24, 64, None),
-    ("surface_b1_b2_side_wall.png", 32, 64, None),
-    ("surface_b1_b2_front_wall.png", 40, 64, None),
-    ("surface_b1_b2_floor.png", 48, 64, None),
-    ("surface_b1_b2_far.png", 56, 64, None),
-    ("surface_b3_b4_ceiling.png", 64, 64, None),
-    ("surface_b3_b4_side_wall.png", 72, 64, None),
-    ("surface_b3_b4_front_wall.png", 80, 64, None),
-    ("surface_b3_b4_floor.png", 88, 64, None),
-    ("surface_b3_b4_far.png", 96, 64, None),
-    ("surface_b5_plus_ceiling.png", 104, 64, None),
-    ("surface_b5_plus_side_wall.png", 112, 64, None),
-    ("surface_b5_plus_front_wall.png", 120, 64, None),
-    ("surface_b5_plus_floor.png", 128, 64, None),
-    ("surface_b5_plus_far.png", 136, 64, None),
+    ("surface_b1_b2_ceiling.png", 0, 128, None),
+    ("surface_b1_b2_side_wall.png", 16, 128, None),
+    ("surface_b1_b2_front_wall.png", 32, 128, None),
+    ("surface_b1_b2_floor.png", 48, 128, None),
+    ("surface_b1_b2_far.png", 64, 128, None),
+    ("surface_b3_b4_ceiling.png", 80, 128, None),
+    ("surface_b3_b4_side_wall.png", 96, 128, None),
+    ("surface_b3_b4_front_wall.png", 112, 128, None),
+    ("surface_b3_b4_floor.png", 128, 128, None),
+    ("surface_b3_b4_far.png", 144, 128, None),
+    ("surface_b5_plus_ceiling.png", 160, 128, None),
+    ("surface_b5_plus_side_wall.png", 176, 128, None),
+    ("surface_b5_plus_front_wall.png", 192, 128, None),
+    ("surface_b5_plus_floor.png", 208, 128, None),
+    ("surface_b5_plus_far.png", 224, 128, None),
 ]
 
 
@@ -160,7 +162,7 @@ def import_walls() -> None:
             continue
         src = _load_png(path)
         _blit_scaled(src, dst, (0, 0, SRC_SIZE - 1, SRC_SIZE - 1),
-                     u, v, 8, 8, remap=remap)
+                     u, v, SURFACE_TILE_SIZE, SURFACE_TILE_SIZE, remap=remap)
         print(f"[OK] wall {path.name} -> ({u},{v})")
 
 
