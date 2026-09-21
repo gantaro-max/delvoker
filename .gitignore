@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Test and tooling output
+.pytest_cache/
+.coverage
+
+# Pyxel runtime output
+delvoker_save.json
+pyxel-*.png
+pyxel-*.gif
+*.pyxapp
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
