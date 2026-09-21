@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/gantaro-max/delvoker/actions/workflows/ci.yml/badge.svg)](https://github.com/gantaro-max/delvoker/actions/workflows/ci.yml)
 
-Pyxel製のレトロスタイル・ダンジョン探索RPGです。プレイヤーは戦えないポーターとして、臨時NPCを管理・支援しながら迷宮を攻略します。
+Pyxel製のレトロスタイル・ダンジョン探索RPGです。プレイヤーはポーターとして、攻撃にも参加しつつ臨時NPCを管理・支援しながら迷宮を攻略します。
 
 | タイトル | 街: Solace Town |
 | :---: | :---: |
@@ -12,7 +12,7 @@ Pyxel製のレトロスタイル・ダンジョン探索RPGです。プレイヤ
 
 ## 特徴
 
-- 非戦闘員のポーターを操作し、AidやEncourageで仲間を支援する戦闘。
+- ポーター自身も攻撃に参加し、AidやEncourageで仲間を支援する戦闘。
 - 性格に応じて行動する、雇用可能な臨時NPC。
 - normalからgenesisまでのランダムエンチャントを含むハクスラ要素。
 - 部位破壊、手続き的なダンジョン生成、鍵扉・罠・泉・商人。
@@ -87,3 +87,9 @@ DISPLAY=:99 python tools/capture_screenshots.py
 `main.py`は3,251行に肥大化し、状態ごとの`update`/`draw`が集中しています。`logic/`、`systems/`、`ui/`への分割を進めており、次の課題は状態ハンドラをモジュールへ分離することです。
 
 BGMは`main.py`内に定義されていますが、音楽データの最終調整までミュートされています。公開後はCIが安定していることを前提に、状態ハンドラ、戦闘ロジック、各メニューの順で安全に分割します。
+
+## ライセンス
+
+Pythonコード、JSONゲームデータ、開発ツール、画像以外のドキュメントは[MIT License](LICENSE)で提供します。
+
+`assets/source/`、`assets.pyxres`、ドキュメント内のPNG画像は[CC BY 4.0](LICENSE-assets.md)で提供します。素材の生成元と帰属方法は[ASSET_CREDITS.md](ASSET_CREDITS.md)を参照してください。

@@ -1,9 +1,37 @@
+from collections import deque
 import random
+
 from constants import (
     TILE_FLOOR, TILE_WALL, TILE_STAIRS, TILE_CHEST,
     TILE_TRAP_SPIKE, TILE_TRAP_POISON, TILE_GRAVE,
     TILE_LOCKED_DOOR, TILE_FOUNTAIN, TILE_MERCHANT,
 )
+
+
+_BLOCK_WALL = frozenset({TILE_WALL})
+_BLOCK_NO_KEY = frozenset({TILE_WALL, TILE_LOCKED_DOOR})
+
+
+def _reachable(tiles, width, height, start, blocked):
+    """Return coordinates reachable from start without crossing blocked tiles."""
+    sx, sy = start
+    if not (0 <= sx < width and 0 <= sy < height):
+        return set()
+    if tiles[sy][sx] in blocked:
+        return set()
+
+    seen = {start}
+    queue = deque([start])
+    while queue:
+        x, y = queue.popleft()
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if not (0 <= nx < width and 0 <= ny < height):
+                continue
+            if (nx, ny) in seen or tiles[ny][nx] in blocked:
+                continue
+            seen.add((nx, ny))
+            queue.append((nx, ny))
+    return seen
 
 
 class Map:
@@ -78,7 +106,10 @@ class Map:
         if len(rooms) >= 2:
             mid = max(1, len(rooms) // 2)
             cr = rooms[mid]
-            tiles[cr[1] + cr[3] // 2][cr[0] + cr[2] // 2] = TILE_CHEST
+            chest_x = cr[0] + cr[2] // 2
+            chest_y = cr[1] + cr[3] // 2
+            if tiles[chest_y][chest_x] != TILE_STAIRS:
+                tiles[chest_y][chest_x] = TILE_CHEST
 
         if rooms:
             start_cx = rooms[0][0] + rooms[0][2] // 2
@@ -132,15 +163,37 @@ class Map:
                 tiles[cy][cx] = TILE_LOCKED_DOOR
                 doors_placed += 1
 
-        # Guarantee a dungeon_key chest in an accessible room if any doors were placed
-        if doors_placed > 0 and len(rooms) >= 2:
+        # A locked floor must provide a key chest reachable without a key.
+        if doors_placed > 0:
+            start = (m.start_x, m.start_y)
+            reachable = _reachable(tiles, width, height, start, _BLOCK_NO_KEY)
             for r in rooms[1:]:
                 kx = r[0] + r[2] // 2
                 ky = r[1] + r[3] // 2
-                if tiles[ky][kx] not in (TILE_WALL, TILE_LOCKED_DOOR):
+                if ((kx, ky) in reachable
+                        and tiles[ky][kx] not in
+                        (TILE_WALL, TILE_LOCKED_DOOR, TILE_STAIRS)):
                     tiles[ky][kx] = TILE_CHEST
                     m.key_chest_pos = (kx, ky)
                     break
+
+            if m.key_chest_pos is None:
+                for ky in range(height):
+                    for kx in range(width):
+                        if ((kx, ky) in reachable
+                                and (kx, ky) != start
+                                and tiles[ky][kx] == TILE_FLOOR):
+                            tiles[ky][kx] = TILE_CHEST
+                            m.key_chest_pos = (kx, ky)
+                            break
+                    if m.key_chest_pos is not None:
+                        break
+
+            if m.key_chest_pos is None:
+                for row in tiles:
+                    for x, tile in enumerate(row):
+                        if tile == TILE_LOCKED_DOOR:
+                            row[x] = TILE_FLOOR
 
         # Fountain placement (50% chance, any floor, not in start room)
         if rooms and random.random() < 0.5:
@@ -154,16 +207,45 @@ class Map:
                     tiles[fy][fx] = TILE_FOUNTAIN
                     break
 
-        # Merchant placement (B3F+, 20% chance)
+        # Merchant placement (B3F+, 20% chance). A merchant is permanent,
+        # so reject positions that cut off the stairs or the key chest.
         if current_floor >= 3 and random.random() < 0.2 and len(rooms) >= 3:
+            stairs_pos = next(
+                ((x, y) for y, row in enumerate(tiles)
+                 for x, tile in enumerate(row) if tile == TILE_STAIRS),
+                None,
+            )
+            blocked = _BLOCK_WALL | {TILE_MERCHANT}
+            blocked_no_key = _BLOCK_NO_KEY | {TILE_MERCHANT}
             shuffled = list(rooms[2:])
             random.shuffle(shuffled)
+            merchant_placed = False
             for rx, ry, rw, rh in shuffled:
                 cands = [(fx, fy) for fy in range(ry, ry + rh)
                          for fx in range(rx, rx + rw) if tiles[fy][fx] == TILE_FLOOR]
-                if cands:
-                    fx, fy = random.choice(cands)
+                if not cands:
+                    continue
+                first = random.choice(cands)
+                ordered = [first] + [pos for pos in cands if pos != first]
+                for fx, fy in ordered:
                     tiles[fy][fx] = TILE_MERCHANT
+                    reachable = _reachable(
+                        tiles, width, height, (m.start_x, m.start_y), blocked
+                    )
+                    reachable_no_key = _reachable(
+                        tiles, width, height, (m.start_x, m.start_y),
+                        blocked_no_key,
+                    )
+                    targets_reachable = (
+                        stairs_pos is not None and stairs_pos in reachable
+                        and (m.key_chest_pos is None
+                             or m.key_chest_pos in reachable_no_key)
+                    )
+                    if targets_reachable:
+                        merchant_placed = True
+                        break
+                    tiles[fy][fx] = TILE_FLOOR
+                if merchant_placed:
                     break
 
         if grave is not None and grave.floor == current_floor:
